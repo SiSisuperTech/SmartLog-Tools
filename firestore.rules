@@ -1,0 +1,30 @@
+// firestore.rules
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Function to check if user is authorized
+    function isAuthorized() {
+      // Method 1: Check custom claims (requires backend setup)
+      return request.auth != null && 
+             (request.auth.token.authorized == true ||
+              // Method 2: Check if user is in the authorizedUsers collection
+              exists(/databases/$(database)/documents/authorizedUsers/$(request.auth.token.email)) ||
+              // Method 3: Check if user has an authorized domain (fallback)
+              request.auth.token.email.matches('.*@allisone.ai$'));
+    }
+    
+    // Only allow authorized users to access data
+    match /{document=**} {
+      allow read, write: if isAuthorized();
+    }
+    
+    // Only admins can modify the authorizedUsers collection
+    match /authorizedUsers/{userId} {
+      allow read: if isAuthorized();
+      allow write: if request.auth != null && 
+                   request.auth.token.admin == true;
+    }
+    
+    // Other specific collection rules can be added here
+  }
+}

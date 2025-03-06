@@ -1,0 +1,105 @@
+{
+    "logStreams": [
+        {
+            "logStreamName": "[production]-[2.4.5]_[1286]31ea59ff7c8fb017a501ea097c3b6e9fff9c948ff898b3f6db14dc4cdc9fd240",
+            "creationTime": 1738333265485,
+            "firstEventTimestamp": 1738333263349,
+            "lastEventTimestamp": 1739378005485,
+            "lastIngestionTime": 1739378005606,
+            "uploadSequenceToken": "49039859619738383771494651651573709368657950550526709136",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[1286]31ea59ff7c8fb017a501ea097c3b6e9fff9c948ff898b3f6db14dc4cdc9fd240",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[2101]72fdb0c31e0479f408b84875d61c7644d4fc395a3ef66f60a2547a9019bf0c4b",
+            "creationTime": 1738333252980,
+            "firstEventTimestamp": 1738333250235,
+            "lastEventTimestamp": 1739377980210,
+            "lastIngestionTime": 1739377982457,
+            "uploadSequenceToken": "49039859619738353001195777226556168715016718714661424422",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[2101]72fdb0c31e0479f408b84875d61c7644d4fc395a3ef66f60a2547a9019bf0c4b",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[225]ba919d067a23a4774a2413345ccab19582f588a08e54443d3ca31ba7c6945fb7",
+            "creationTime": 1738333483109,
+            "firstEventTimestamp": 1738333480279,
+            "lastEventTimestamp": 1739377970908,
+            "lastIngestionTime": 1739377971880,
+            "uploadSequenceToken": "49039859619738338941951265809500981982785809760725421492",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[225]ba919d067a23a4774a2413345ccab19582f588a08e54443d3ca31ba7c6945fb7",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[1998]a3cf71ae3f6823d03380901f26da3a96364c89e321b6bb6741d28c964ec8d0f6",
+            "creationTime": 1738571913489,
+            "firstEventTimestamp": 1738571911795,
+            "lastEventTimestamp": 1739377963034,
+            "lastIngestionTime": 1739377963303,
+            "uploadSequenceToken": "49039859619738327541162745962277540779954650787038809472",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[1998]a3cf71ae3f6823d03380901f26da3a96364c89e321b6bb6741d28c964ec8d0f6",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[1939]7c6dcd5947120aaa4a12ebc01f3ee2d8bcf571d80081e0c1f2bdb23eaa89aa60",
+            "creationTime": 1738333463802,
+            "firstEventTimestamp": 1738333461360,
+            "lastEventTimestamp": 1739377893537,
+            "lastIngestionTime": 1739377894611,
+            "uploadSequenceToken": "49039859619738236233833259504836399949629968312473144657",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[1939]7c6dcd5947120aaa4a12ebc01f3ee2d8bcf571d80081e0c1f2bdb23eaa89aa60",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[testing]-[2.5.0-alpha.2]_[6565]cbfb4709f7b26bba7714ae126175a28a6ba02302b8c31cb748c380626ae259be",
+            "creationTime": 1738838396629,
+            "firstEventTimestamp": 1738838393072,
+            "lastEventTimestamp": 1739377809472,
+            "lastIngestionTime": 1739377812363,
+            "uploadSequenceToken": "49039859619738126907489062187075685964392104144235318697",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[testing]-[2.5.0-alpha.2]_[6565]cbfb4709f7b26bba7714ae126175a28a6ba02302b8c31cb748c380626ae259be",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[2168]a81dc2e535b860be311d0d7442691c6cd967f91de5cd2e2cc2b361b62ce03c06",
+            "creationTime": 1738333273740,
+            "firstEventTimestamp": 1738333271588,
+            "lastEventTimestamp": 1739377733288,
+            "lastIngestionTime": 1739377734738,
+            "uploadSequenceToken": "49039859619738023726165889382981052393710498885638212980",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[2168]a81dc2e535b860be311d0d7442691c6cd967f91de5cd2e2cc2b361b62ce03c06",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[1886]ebf7db3bedaec7a45f6297474681d0f7c2f4d67c0a6d43238e593a75d802a7ff",
+            "creationTime": 1738333400179,
+            "firstEventTimestamp": 1738333396644,
+            "lastEventTimestamp": 1739377730018,
+            "lastIngestionTime": 1739377731873,
+            "uploadSequenceToken": "49039859619738019917927681459197077311316313264699919695",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[1886]ebf7db3bedaec7a45f6297474681d0f7c2f4d67c0a6d43238e593a75d802a7ff",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[627]4832bd5cf309e0151ac46cafbe20514cf5ffd564517df1011281d9aed2001630",
+            "creationTime": 1738333246376,
+            "firstEventTimestamp": 1738333244861,
+            "lastEventTimestamp": 1739377727716,
+            "lastIngestionTime": 1739377729584,
+            "uploadSequenceToken": "49039859619738016875324799107524644867455858312150174991",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[627]4832bd5cf309e0151ac46cafbe20514cf5ffd564517df1011281d9aed2001630",
+            "storedBytes": 0
+        },
+        {
+            "logStreamName": "[production]-[2.4.5]_[1662]6861e60387f125f9980cf17ba34afe00530109c67d6e1e6feed652351cbe1a17",
+            "creationTime": 1738333371147,
+            "firstEventTimestamp": 1738333368786,
+            "lastEventTimestamp": 1739377703151,
+            "lastIngestionTime": 1739377703188,
+            "uploadSequenceToken": "49039859619737981789022622368885264320205558917379050835",
+            "arn": "arn:aws:logs:eu-west-3:168675822003:log-group:allisone-plus-log-group:log-stream:[production]-[2.4.5]_[1662]6861e60387f125f9980cf17ba34afe00530109c67d6e1e6feed652351cbe1a17",
+            "storedBytes": 0
+        }
+    ],
+    "nextToken": "Kwfr0bfVKkYk4OrYazFRiZH78_43NHpCEcSExVZNroHmwm0VmtIikB2dTMyLUUzXvcdBbg8ozbVdtzAyYoZT0jJsNxCuJhUY7O16GMgMoIZ49viG3sXXPL0cX2ILbEij_YAcN-8kAuGfK88XkEg3GcgWDZ7GHQxwlPrPs61E54C7QYG22jLtV0FW01ZybwUCzr-UZ4PqRt6aAW3deGsAoi9Eih5xRDgHJ6ycpEA9q_NfOoAJZMuYK0BR_6U5gLRU7nVSeRNSvRUbAaPjGpH2FQBPHSRuljuI1HmOHRNRAF0etCmnv-vQaMl8_5nKxyxkRejWJwBixhMmJJhIJO9aTTB-Yws5dANXgRRlT96EAKcVZy8cewactij9Cl6mNHxrgimXqVVEiFXv5pddAv_qbF9nwVjx9txTDT_Vq2vMWk8"
+}
