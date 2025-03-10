@@ -1,223 +1,165 @@
-import { useState, useCallback, useEffect } from 'react';
-import { functions } from '../firebase'; // Your Firebase config
-import { httpsCallable } from 'firebase/functions';
-import { useAuth } from '../contexts/AuthContext'; // Assuming you have an auth context
+import { useState, useEffect, useCallback } from 'react';
+import { getFunctions, httpsCallable } from 'firebase/functions';
+import { useAuth } from '../contexts/AuthContext';
+import type { AwsAuthStatus } from '../types';
 
-// Types for SSO login states and responses
-interface SsoSessionInfo {
-  sessionId: string;
-  userCode: string;
-  verificationUri: string;
-}
-
-interface SsoStatusResponse {
-  status: 'pending' | 'authorized' | 'failed';
-  identity?: string | null;
-}
-
-interface AwsSsoConfig {
-  configured: boolean;
-  startUrl?: string;
-  region?: string;
-}
-
-export function useAwsAuth() {
+export const useAwsAuth = () => {
   const { currentUser } = useAuth();
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
-  const [isSsoLoading, setIsSsoLoading] = useState(false);
-  const [awsSsoConfig, setAwsSsoConfig] = useState<AwsSsoConfig | null>(null);
-  const [authStatus, setAuthStatus] = useState<{
-    status?: string;
-    identity?: string | null;
-    error?: string;
-    requiresSetup?: boolean;
-  } | null>(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [instructions, setInstructions] = useState<string | null>(null);
+  
+  const [authStatus, setAuthStatus] = useState<AwsAuthStatus>({
+    isAuthenticated: false
+  });
 
-  // Check AWS authentication status and configuration on component mount
-  useEffect(() => {
-    const checkAwsAuthStatus = async () => {
-      if (!currentUser) {
-        setIsAuthenticated(null);
-        setIsCheckingAuth(false);
-        return;
-      }
+  // Generic error handler for network and auth issues
+  const handleFetchError = useCallback((error: unknown) => {
+    console.error('AWS Authentication Error:', error);
+    
+    const errorMessage = error instanceof Error 
+      ? error.message 
+      : 'Unknown authentication error';
+    
+    setAuthStatus(prevStatus => ({
+      ...prevStatus,
+      isAuthenticated: false,
+      error: errorMessage
+    }));
 
-      try {
-        setIsCheckingAuth(true);
-        
-        // Get user's AWS SSO configuration
-        const getUserAwsSsoConfig = httpsCallable<void, AwsSsoConfig>(
-          functions, 
-          'getUserAwsSsoConfig'
-        );
-        const configResult = await getUserAwsSsoConfig();
-        setAwsSsoConfig(configResult.data);
-
-        // Check authentication status
-        const checkAuthCallable = httpsCallable<void, {
-          isAuthenticated: boolean;
-          identity?: string;
-        }>(functions, 'checkUserAwsAuthStatus');
-        
-        const result = await checkAuthCallable();
-        
-        setIsAuthenticated(result.data.isAuthenticated);
-        setAuthStatus({
-          status: result.data.isAuthenticated ? 'authorized' : 'failed',
-          identity: result.data.identity
-        });
-      } catch (error) {
-        console.error('AWS Auth Check Error:', error);
-        setIsAuthenticated(false);
-        setAuthStatus({
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Authentication check failed'
-        });
-      } finally {
-        setIsCheckingAuth(false);
-      }
-    };
-
-    checkAwsAuthStatus();
-  }, [currentUser]);
-
-  // Setup AWS SSO Configuration
-  const setupAwsSso = useCallback(async (config: {
-    startUrl: string;
-    clientId: string;
-    region?: string;
-    accountId?: string;
-    roleName?: string;
-  }) => {
-    if (!currentUser) {
-      throw new Error('User not authenticated');
-    }
-
-    try {
-      const setupUserAwsSsoConfig = httpsCallable<
-        typeof config, 
-        { success: boolean; message: string }
-      >(functions, 'setupUserAwsSsoConfig');
-
-      const result = await setupUserAwsSsoConfig(config);
-      
-      // Refresh configuration
-      const getUserAwsSsoConfig = httpsCallable<void, AwsSsoConfig>(
-        functions, 
-        'getUserAwsSsoConfig'
-      );
-      const configResult = await getUserAwsSsoConfig();
-      setAwsSsoConfig(configResult.data);
-
-      return result.data;
-    } catch (error) {
-      console.error('AWS SSO Setup Error:', error);
-      throw error;
-    }
-  }, [currentUser]);
-
-  // Initiate AWS SSO Login
-  const login = useCallback(async () => {
-    if (!currentUser) {
-      throw new Error('User not authenticated');
-    }
-
-    try {
-      setIsSsoLoading(true);
-      setAuthStatus(null);
-
-      // Call Firebase function to initiate SSO login
-      const initiateUserAwsSsoLogin = httpsCallable<
-        void, 
-        SsoSessionInfo
-      >(functions, 'initiateUserAwsSsoLogin');
-
-      const result = await initiateUserAwsSsoLogin();
-      const { sessionId, userCode, verificationUri } = result.data;
-
-      // Open verification URL in a new window
-      window.open(verificationUri, '_blank', 'width=600,height=600');
-
-      // Start polling for login status
-      await pollLoginStatus(sessionId);
-    } catch (error) {
-      console.error('AWS SSO Login Error:', error);
-      setIsSsoLoading(false);
-      
-      // Handle configuration setup requirement
-      if (error.details?.requiresSetup) {
-        setAuthStatus({
-          status: 'failed',
-          requiresSetup: true,
-          error: 'AWS SSO configuration required'
-        });
-      } else {
-        setAuthStatus({
-          status: 'failed',
-          error: error instanceof Error ? error.message : 'Login failed'
-        });
-      }
-      throw error;
-    }
-  }, [currentUser]);
-
-  // Poll login status
-  const pollLoginStatus = useCallback(async (sessionId: string) => {
-    const pollAwsSsoLoginStatus = httpsCallable<
-      { sessionId: string }, 
-      SsoStatusResponse
-    >(functions, 'pollAwsSsoLoginStatus');
-
-    const maxAttempts = 60; // 5 minutes (60 * 5 seconds)
-    let attempts = 0;
-
-    return new Promise<void>((resolve, reject) => {
-      const intervalId = setInterval(async () => {
-        try {
-          const result = await pollAwsSsoLoginStatus({ sessionId });
-
-          attempts++;
-
-          switch (result.data.status) {
-            case 'authorized':
-              clearInterval(intervalId);
-              setIsAuthenticated(true);
-              setAuthStatus({
-                status: 'authorized',
-                identity: result.data.identity
-              });
-              setIsSsoLoading(false);
-              resolve();
-              break;
-            case 'pending':
-              if (attempts >= maxAttempts) {
-                clearInterval(intervalId);
-                throw new Error('Login timeout');
-              }
-              break;
-          }
-        } catch (error) {
-          clearInterval(intervalId);
-          setIsAuthenticated(false);
-          setAuthStatus({
-            status: 'failed',
-            error: error instanceof Error ? error.message : 'Login failed'
-          });
-          setIsSsoLoading(false);
-          reject(error);
-        }
-      }, 5000); // Poll every 5 seconds
-    });
+    setIsAuthenticated(false);
+    setIsCheckingAuth(false);
   }, []);
 
+  // Check authentication status
+  const checkStatus = useCallback(async () => {
+    if (!currentUser) {
+      setIsAuthenticated(false);
+      setIsCheckingAuth(false);
+      return;
+    }
+
+    try {
+      setIsCheckingAuth(true);
+      
+      const functions = getFunctions();
+      const systemCheckAwsConnection = httpsCallable(functions, 'systemCheckAwsConnection');
+      
+      const result = await systemCheckAwsConnection({});
+      const data = result.data as any;
+      
+      if (data.isAuthenticated) {
+        setIsAuthenticated(true);
+        setAuthStatus(prevStatus => ({
+          ...prevStatus,
+          isAuthenticated: true,
+          identity: data.identity
+        }));
+      } else {
+        setIsAuthenticated(false);
+        setAuthStatus(prevStatus => ({
+          ...prevStatus,
+          isAuthenticated: false,
+          error: data.error || 'Failed to authenticate with AWS'
+        }));
+      }
+    } catch (err) {
+      handleFetchError(err);
+    } finally {
+      setIsCheckingAuth(false);
+    }
+  }, [currentUser, handleFetchError]);
+
+  // Initiate AWS CLI login process
+  const initiateLogin = async () => {
+    if (!currentUser) {
+      console.error('Must be logged in with Firebase first');
+      return false;
+    }
+
+    try {
+      const functions = getFunctions();
+      const initiateAwsCliLoginFunction = httpsCallable(functions, 'initiateAwsCliLogin');
+      
+      const result = await initiateAwsCliLoginFunction({ profile: 'default' });
+      const data = result.data as any;
+      
+      if (data.success) {
+        setSessionId(data.sessionId);
+        setInstructions(data.message);
+        return true;
+      } else {
+        throw new Error(data.error || 'Failed to initiate AWS CLI login');
+      }
+    } catch (error) {
+      handleFetchError(error);
+      return false;
+    }
+  };
+
+  // Verify AWS CLI credentials
+  const verifyConnection = async () => {
+    if (!sessionId) {
+      console.error('No active session. Please initiate login first.');
+      return false;
+    }
+
+    try {
+      setIsVerifying(true);
+      
+      const functions = getFunctions();
+      const verifyAwsCliCredentialsFunction = httpsCallable(functions, 'verifyAwsCliCredentials');
+      
+      const result = await verifyAwsCliCredentialsFunction({ sessionId });
+      const data = result.data as any;
+      
+      if (data.success && data.isAuthenticated) {
+        setIsAuthenticated(true);
+        setAuthStatus(prevStatus => ({
+          ...prevStatus,
+          isAuthenticated: true,
+          identity: data.identity
+        }));
+        return true;
+      } else {
+        setIsAuthenticated(false);
+        setAuthStatus(prevStatus => ({
+          ...prevStatus,
+          isAuthenticated: false,
+          error: data.error || 'Failed to verify AWS credentials'
+        }));
+        return false;
+      }
+    } catch (error) {
+      handleFetchError(error);
+      return false;
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
+  // Check status on component mount and periodically
+  useEffect(() => {
+    if (currentUser) {
+      checkStatus();
+      const interval = setInterval(checkStatus, 300000); // Check every 5 minutes
+      return () => clearInterval(interval);
+    } else {
+      setIsAuthenticated(false);
+      setIsCheckingAuth(false);
+    }
+  }, [currentUser, checkStatus]);
+
   return {
-    login,
-    setupAwsSso,
     isAuthenticated,
     isCheckingAuth,
-    isSsoLoading,
+    isVerifying,
     authStatus,
-    awsSsoConfig
+    instructions,
+    initiateLogin,
+    verifyConnection,
+    sessionId
   };
-}
+};

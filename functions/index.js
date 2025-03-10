@@ -1,4 +1,4 @@
-// functions/index.js
+// functions/index.js - Updated for AWS CLI-based authentication
 const functions = require('firebase-functions');
 const admin = require('firebase-admin');
 const express = require('express');
@@ -8,15 +8,23 @@ const AWS = require('aws-sdk');
 // Initialize Firebase Admin
 admin.initializeApp();
 
-// Import the analyze-logs function and SSO helper
+// Import the analyze-logs function and auth middleware
 const { analyzeLogs } = require('./analyze-logs');
 const { validateAuth } = require('./auth-middleware');
 const { getAwsSsoCredentials, storeAwsSsoCredentials } = require('./aws-sso-helper');
+
+// Import the AWS CLI-based helper functions
+const { 
+  initiateAwsCliLogin, 
+  verifyAwsCliCredentials,
+  checkAwsSsoStatus
+} = require('./aws-cli-helper');
 
 // Create Express app for API endpoints
 const app = express();
 
 // CORS configuration - MUST come before routes
+// Allow all origins in development, or specify allowed domains for production
 app.use(cors({
   origin: [
     'https://smart-log-bbc65.web.app',
@@ -78,15 +86,14 @@ app.post('/aws-login', validateAuth, async (req, res) => {
   try {
     console.log('AWS login requested by:', req.user.email);
     
-    // Since we can't do browser-based SSO in Functions,
-    // we'll check if we have valid stored credentials
+    // Check if we have valid stored credentials
     const awsConfigured = await getAwsSsoCredentials();
     
     if (!awsConfigured) {
       return res.status(400).json({
         success: false,
-        error: 'AWS SSO credentials not found or expired. Please run the credential uploader tool.',
-        needsCredentials: true
+        error: 'AWS SSO credentials not found or expired. Please run the AWS CLI login.',
+        needsCliLogin: true
       });
     }
     
@@ -108,7 +115,7 @@ app.post('/aws-login', validateAuth, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'AWS authentication failed: ' + awsError.message,
-        needsCredentials: true
+        needsCliLogin: true
       });
     }
   } catch (error) {
@@ -116,6 +123,9 @@ app.post('/aws-login', validateAuth, async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// AWS SSO status check endpoint
+app.get('/aws-sso-status', validateAuth, checkAwsSsoStatus);
 
 // CloudWatch logs query endpoint
 app.post('/logs', validateAuth, async (req, res) => {
@@ -126,7 +136,7 @@ app.post('/logs', validateAuth, async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'AWS SSO credentials not found or expired',
-        needsCredentials: true
+        needsCliLogin: true
       });
     }
     
@@ -221,13 +231,26 @@ app.use((err, req, res, next) => {
   }
 });
 
-// Export the Express app as a Firebase Function
-exports.api = functions.https.onRequest(app);
+// Export the Express app as a Firebase Function with CORS handling
+exports.api = functions.https.onRequest((req, res) => {
+  // Set CORS headers for all responses
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  
+  if (req.method === 'OPTIONS') {
+    // Handle preflight requests
+    res.status(204).send('');
+    return;
+  }
+  
+  return app(req, res);
+});
 
-// Export the analyzeLogs callable function
-exports.analyzeLogs = analyzeLogs;
-
-// Export the store AWS credentials function
+// Export callable functions (these handle CORS automatically)
+exports.initiateAwsCliLogin = functions.https.onCall(initiateAwsCliLogin);
+exports.verifyAwsCliCredentials = functions.https.onCall(verifyAwsCliCredentials);
+exports.analyzeLogs = functions.https.onCall(analyzeLogs);
 exports.storeAwsSsoCredentials = functions.https.onCall(storeAwsSsoCredentials);
 
 // File upload handler for Storage triggers

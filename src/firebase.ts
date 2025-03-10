@@ -6,12 +6,12 @@ import { getFunctions } from 'firebase/functions';
 
 // Firebase configuration
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyC8yl_OxZysE3oOaok7-hp7sP2V-vPEIfA",
-  authDomain: "smart-log-bbc65.firebaseapp.com",
-  projectId: "smart-log-bbc65",
-  storageBucket: "smart-log-bbc65.appspot.com",
-  messagingSenderId: "399257614187",
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:399257614187:web:your-app-id-here"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // Initialize Firebase

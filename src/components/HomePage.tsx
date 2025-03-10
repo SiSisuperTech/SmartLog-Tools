@@ -1,6 +1,7 @@
 // src/components/HomePage.tsx
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
+import AwsConnectionStatus from './AwsConnectionStatus';
 import { 
   Upload, 
   Search, 
@@ -14,6 +15,7 @@ import {
   User
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
+import AwsCliLogin from './AwsCliLogin';
 
 interface HomePageProps {
   isAuthenticated: boolean | null;
@@ -126,28 +128,18 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </main>
 
-      {/* Authentication Section */}
       {!isAuthenticated && (
-        <div className="p-6 text-center">
-          <button 
-            onClick={onAwsLogin}
-            disabled={isCheckingAuth}
-            className={`
-              bg-blue-600 text-white 
-              px-6 py-3 rounded-lg 
-              hover:bg-blue-700 
-              transition-colors
-              ${isCheckingAuth ? 'opacity-50 cursor-not-allowed' : ''}
-            `}
-          >
-            {isCheckingAuth ? 'Checking Authentication...' : 'Login to AWS'}
-          </button>
-        </div>
-      )}
+  <div className="p-6 max-w-lg mx-auto w-full">
+    <h2 className="text-xl font-semibold text-white mb-4 text-center">
+      AWS Authentication Required
+    </h2>
+    <AwsConnectionStatus />
+  </div>
+)}
 
       {/* Footer */}
       <footer className="p-6 text-center text-gray-400">
-         sisi v1.0.0
+        sisi v1.0.0
       </footer>
     </div>
   );
