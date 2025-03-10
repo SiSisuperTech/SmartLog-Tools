@@ -9,8 +9,11 @@ import {
   Wrench,
   Cctv,
   Lock, 
-  Unlock 
+  Unlock,
+  LogOut,
+  User
 } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 interface HomePageProps {
   isAuthenticated: boolean | null;
@@ -24,6 +27,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onAwsLogin 
 }) => {
   const navigate = useNavigate();
+  const { currentUser, signOut } = useAuth();
 
   const ActionCard: React.FC<{
     icon: React.ElementType;
@@ -58,11 +62,34 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="flex items-center">
           <Cctv className="w-8 h-8 mr-3 text-blue-400" />
           <h1 className="text-2xl font-bold text-white">Log Analysis Hub</h1>
+          <span className="ml-3 px-2 py-1 bg-blue-500/20 text-yellow-300 rounded-full text-xs">BETA</span>
+        </div>
+        
+        <div className="flex items-center space-x-6">
+          {/* Google Auth Status */}
+          {currentUser && (
+            <div className="flex items-center text-green-400">
+              {currentUser.photoURL ? (
+                <img 
+                  src={currentUser.photoURL} 
+                  alt="Profile" 
+                  className="w-8 h-8 rounded-full mr-2 border border-green-400"
+                />
+              ) : (
+                <User className="w-6 h-6 mr-2 border border-green-400 rounded-full p-1" />
+              )}
+              <span className="mr-2 hidden md:inline">{currentUser.email}</span>
+              <button 
+                onClick={() => signOut()}
+                className="text-red-400 hover:text-red-300 transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            </div>
+          )}
           
-              <span className="ml-3 px-2 py-1 bg-blue-500/20 text-yellow-300 rounded-full text-xs ">BETA
-              </span>
-                  </div>
-        <div className="flex items-center space-x-3">
+          {/* AWS Auth Status */}
           {isAuthenticated !== null && (
             <div 
               className={`
@@ -71,7 +98,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               `}
             >
               {isAuthenticated ? <Unlock className="mr-2" /> : <Lock className="mr-2" />}
-              {isAuthenticated ? 'Authenticated' : 'Not Authenticated'}
+              {isAuthenticated ? 'AWS Connected' : 'AWS Not Connected'}
             </div>
           )}
         </div>

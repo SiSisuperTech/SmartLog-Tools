@@ -1,8 +1,11 @@
+// types.ts - Consolidated and fixed type definitions
+
 // Authentication Types
 export interface AwsAuthStatus {
   isAuthenticated: boolean;
   error?: string;
   identity?: string;
+  needsCredentials?: boolean;
 }
 
 // Log-related Types
@@ -12,8 +15,6 @@ export interface LogEntry {
   logStream: string;
   severity?: 'info' | 'warning' | 'error';
 }
-
-
 
 export interface LogAnalysis {
   mistralAnalysis: string;
@@ -47,17 +48,11 @@ export interface LogQueryParams {
   limit?: number;
 }
 
+// Component Props
 export interface HomePageProps {
   isAuthenticated: boolean | null;
   isCheckingAuth: boolean;
   onAwsLogin: () => Promise<void>;
-  
-}
-// types.ts
-export interface AwsAuthStatus {
-  isAuthenticated: boolean;
-  error?: string;
-  identity?: string;
 }
 
 export interface LogViewerProps {
@@ -72,6 +67,15 @@ export interface ManualUploadProps {
 
 export interface LogAnalysisProps {
   source?: 'aws' | 'manual';
+}
+
+export interface ConnectionStatusProps {
+  isAuthenticated: boolean;
+}
+
+export interface MistralAnalysisProps {
+  logs: LogEntry[];
+  onAnalysisComplete: (analysis: string) => void;
 }
 
 // API Response Types
@@ -99,13 +103,4 @@ export interface MistralAnalysisResponse {
 export interface DateRange {
   startTime: string;
   endTime: string;
-}
-
-export interface ConnectionStatusProps {
-  isAuthenticated: boolean;
-}
-
-export interface MistralAnalysisProps {
-  logs: LogEntry[];
-  onAnalysisComplete: (analysis: string) => void;
 }
