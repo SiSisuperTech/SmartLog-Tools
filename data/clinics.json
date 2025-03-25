@@ -1,0 +1,18 @@
+{
+  "clinics": [
+    {
+      "id": "clinic-1742837990220-ob6tz",
+      "name": "Vitaldent - Igualada",
+      "locationId": "2111",
+      "schedule": "hourly",
+      "lastRun": null,
+      "nextRun": "2025-03-24T18:00:00.220Z",
+      "slackEnabled": true,
+      "slackWebhook": "https://hooks.slack.com/services/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",
+      "isActive": true,
+      "lastPanoTime": "2025-03-24T15:05:23.841Z",
+      "noActivityAlertSent": false,
+      "status": "active"
+    }
+  ]
+}

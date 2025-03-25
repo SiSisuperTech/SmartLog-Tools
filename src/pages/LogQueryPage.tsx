@@ -11,12 +11,10 @@ import {
   UserCircle,
   X,
   Filter,
-  PlusCircle,
-  AlertCircle,
-  XCircle
+  Plus
 } from 'lucide-react';
 import { useAwsAuth } from '../hooks/useAwsAuth';
-import locationData from '/Users/simon/Documents/project8/data.json';
+import locationData from 'C:/Users/SISI/Documents/SmartLog-Tools/data.json';
 
 type Location = {
   ID: number;
@@ -143,146 +141,34 @@ const LogQueryPage: React.FC = () => {
   const [isLocationDropdownOpen, setIsLocationDropdownOpen] = useState(false);
   const locationDropdownRef = useRef<HTMLDivElement>(null);
   const [selectedLocations, setSelectedLocations] = useState<Location[]>([]);
-  const [manualLocationId, setManualLocationId] = useState('');
-  const [manualLocationName, setManualLocationName] = useState('');
-  const [notification, setNotification] = useState<{
-    type: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  
+  // New state for manual location entry
+  const [manualLocationId, setManualLocationId] = useState<string>('');
+  const [manualLocationName, setManualLocationName] = useState<string>('');
+  const [showManualEntry, setShowManualEntry] = useState<boolean>(false);
 
   // Filter locations based on search term
-const filteredLocations = React.useMemo(() => 
-  locationData.filter(location => 
+  const filteredLocations = locationData.filter(location => 
     location.Title.toLowerCase().includes(searchTerm.toLowerCase())
-  ), 
-  [searchTerm, locationData]
-);
-
-// Update selected locations whenever locationIds changes
-
-useEffect(() => {
-  // Combine predefined and custom locations
-  const predefinedSelected = locationData.filter(loc => 
-    queryParams.locationIds.includes(loc.ID)
   );
 
-  // Add custom locations not in the predefined list
-  const customLocations = queryParams.locationIds
-    .filter(id => !predefinedSelected.some(loc => loc.ID === id))
-    .map(id => ({
-      ID: id,
-      Title: manualLocationName || `Custom Location ${id}`
-    }));
+  // Update selected locations whenever locationIds changes
+  useEffect(() => {
+    const selected = locationData.filter(loc => queryParams.locationIds.includes(loc.ID));
+    setSelectedLocations(selected);
+  }, [queryParams.locationIds]);
 
-  setSelectedLocations([...predefinedSelected, ...customLocations]);
-}, [queryParams.locationIds, locationData, manualLocationName]);
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target as Node)) {
+        setIsLocationDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
-// Close dropdown when clicking outside
-useEffect(() => {
-  const handleClickOutside = (event: MouseEvent) => {
-    if (
-      locationDropdownRef.current && 
-      !locationDropdownRef.current.contains(event.target as Node)
-    ) {
-      setIsLocationDropdownOpen(false);
-      
-      // Clear any notifications after a short delay
-      const timeoutId = setTimeout(() => {
-        setNotification(null);
-      }, 300);
-
-      return () => clearTimeout(timeoutId);
-    }
-  };
-
-  document.addEventListener('mousedown', handleClickOutside);
-  return () => document.removeEventListener('mousedown', handleClickOutside);
-}, []);
-
-// Show notification with improved type safety
-const showNotification = (type: 'success' | 'error', message: string) => {
-  setNotification({ type, message });
-  
-  // Automatically clear notification after 3 seconds
-  const timeoutId = setTimeout(() => {
-    setNotification(null);
-  }, 3000);
-
-  // Return cleanup function
-  return () => clearTimeout(timeoutId);
-};
-
-// Add manual location with enhanced validation
-const addManualLocation = () => {
-  // Trim the input and validate
-  const locationIdInput = manualLocationId.trim();
-  
-  // Check if input is empty
-  if (locationIdInput === '') {
-    showNotification('error', 'Please enter a location ID');
-    return;
-  }
-
-  const locationId = parseInt(locationIdInput, 10);
-  
-  // Validate input
-  if (isNaN(locationId)) {
-    showNotification('error', 'Please enter a valid location ID');
-    return;
-  }
-
-  // Check if location ID already exists
-  if (queryParams.locationIds.includes(locationId)) {
-    showNotification('error', 'This location ID is already added');
-    return;
-  }
-
-  // Update query params
-  setQueryParams(prev => ({
-    ...prev,
-    locationIds: [...prev.locationIds, locationId]
-  }));
-
-  // Show success notification
-  showNotification('success', `Location ${locationId} added successfully`);
-
-  // Reset input fields and close dropdown
-  setManualLocationId('');
-  setManualLocationName('');
-  setIsLocationDropdownOpen(false);
-};
-
-// Notification component with improved typing
-const Notification: React.FC = () => {
-  if (!notification) return null;
-
-  const isSuccess = notification.type === 'success';
-
-  return (
-    <div 
-      className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg transition-all duration-300 
-        ${isSuccess 
-          ? 'bg-green-600/90 text-white' 
-          : 'bg-red-600/90 text-white'
-        }`}
-    >
-      <div className="flex items-center space-x-2">
-        {isSuccess ? (
-          <Check className="w-5 h-5" />
-        ) : (
-          <AlertCircle className="w-5 h-5" />
-        )}
-        <span>{notification.message}</span>
-        <button 
-          onClick={() => setNotification(null)}
-          className="ml-2 hover:bg-white/20 rounded-full p-1 transition"
-        >
-          <XCircle className="w-4 h-4" />
-        </button>
-      </div>
-    </div>
-  );
-};
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -454,7 +340,6 @@ const Notification: React.FC = () => {
       setIsLoading(false);
     }
   };
-  
   const toggleLocation = (id: number) => {
     setQueryParams(prev => ({
       ...prev,
@@ -484,6 +369,48 @@ const Notification: React.FC = () => {
       ...prev,
       locationIds: []
     }));
+  };
+
+  // Add new function to handle manual location addition
+  const handleAddManualLocation = (e: React.FormEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Validate inputs
+    const locationId = parseInt(manualLocationId, 10);
+    if (isNaN(locationId) || locationId <= 0) {
+      alert('Please enter a valid location ID (positive number)');
+      return;
+    }
+    
+    if (!manualLocationName.trim()) {
+      alert('Please enter a location name');
+      return;
+    }
+    
+    // Check if the location ID already exists
+    if (queryParams.locationIds.includes(locationId)) {
+      alert('This location ID is already selected');
+      return;
+    }
+    
+    // Create a new location object
+    const newLocation: Location = {
+      ID: locationId,
+      Title: manualLocationName.trim()
+    };
+    
+    // Add to selected locations and update locationIds
+    setSelectedLocations(prev => [...prev, newLocation]);
+    setQueryParams(prev => ({
+      ...prev,
+      locationIds: [...prev.locationIds, locationId]
+    }));
+    
+    // Reset form fields
+    setManualLocationId('');
+    setManualLocationName('');
+    setShowManualEntry(false);
   };
 
   if (!isAuthenticated) {
@@ -590,78 +517,46 @@ const Notification: React.FC = () => {
             </div>
 
             {/* Locations Section */}
-        <div className="bg-slate-700/70 rounded-xl p-6 border border-slate-600">
-          <h2 className="text-xl text-white mb-4 font-medium flex items-center gap-2">
-            <MapPin className="text-red-400" />
-            Locations
-          </h2>
-          
-          {/* Location Selector */}
-          <div ref={locationDropdownRef} className="relative mb-4">
-            <div
-              className="flex items-center justify-between px-4 py-3 bg-slate-600 rounded-lg cursor-pointer transition hover:bg-slate-500 border border-slate-500"
-              onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
-            >
-              <div className="flex items-center gap-2">
-                <Filter className="h-5 w-5 text-white/70" />
-                <span className="text-white">
-                  {queryParams.locationIds.length 
-                    ? `${queryParams.locationIds.length} location${queryParams.locationIds.length > 1 ? 's' : ''} selected`
-                    : 'Select locations'
-                  }
-                </span>
-              </div>
-              <ChevronDown 
-                className={`w-5 h-5 text-white/70 transition-transform ${isLocationDropdownOpen ? 'rotate-180' : ''}`}
-              />
-            </div>
-
-            {isLocationDropdownOpen && (
-              <div className="absolute z-10 w-full mt-2 bg-slate-700 rounded-lg shadow-xl border border-slate-600 overflow-hidden">
-                {/* Manual Location Input Section */}
-                <div className="p-4 border-b border-slate-600 bg-slate-800">
-                  <div className="flex items-center space-x-2">
-                    <div className="flex-grow">
-                      <input
-                        type="text"
-                        placeholder="Location ID"
-                        value={manualLocationId}
-                        onChange={(e) => setManualLocationId(e.target.value)}
-                        className="w-full bg-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 text-white border border-slate-500"
-                      />
-                    </div>
-                    <div className="flex-grow">
-                      <input
-                        type="text"
-                        placeholder="Location Name (optional)"
-                        value={manualLocationName}
-                        onChange={(e) => setManualLocationName(e.target.value)}
-                        className="w-full bg-slate-600 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-400 text-white border border-slate-500"
-                      />
-                    </div>
-                    <button
-                      type="button"
-                      onClick={addManualLocation}
-                      className="bg-blue-600 text-white rounded-lg px-3 py-2 hover:bg-blue-700 transition"
-                    >
-                      <PlusCircle className="h-5 w-5" />
-                    </button>
+            <div className="bg-slate-700/70 rounded-xl p-6 border border-slate-600">
+              <h2 className="text-xl text-white mb-4 font-medium flex items-center gap-2">
+                <MapPin className="text-red-400" />
+                Locations
+              </h2>
+              
+              {/* Location Selector */}
+              <div ref={locationDropdownRef} className="relative mb-4">
+                <div
+                  className="flex items-center justify-between px-4 py-3 bg-slate-600 rounded-lg cursor-pointer transition hover:bg-slate-500 border border-slate-500"
+                  onClick={() => setIsLocationDropdownOpen(!isLocationDropdownOpen)}
+                >
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-5 w-5 text-white/70" />
+                    <span className="text-white">
+                      {queryParams.locationIds.length 
+                        ? `${queryParams.locationIds.length} location${queryParams.locationIds.length > 1 ? 's' : ''} selected`
+                        : 'Select locations'
+                      }
+                    </span>
                   </div>
+                  <ChevronDown 
+                    className={`w-5 h-5 text-white/70 transition-transform ${isLocationDropdownOpen ? 'rotate-180' : ''}`}
+                  />
                 </div>
 
-                {/* Existing location search input */}
-                <div className="p-4 border-b border-slate-600">
-                  <div className="relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50 h-4 w-4" />
-                    <input
-                      type="text"
-                      placeholder="Search locations..."
-                      value={searchTerm}
-                      onChange={e => setSearchTerm(e.target.value)}
-                      className="w-full bg-slate-600 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-white border border-slate-500"
-                    />
-                  </div>
-                </div>
+                {isLocationDropdownOpen && (
+                  <div className="absolute z-10 w-full mt-2 bg-slate-700 rounded-lg shadow-xl border border-slate-600 overflow-hidden">
+                    <div className="p-4 border-b border-slate-600">
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/50 h-4 w-4" />
+                        <input
+                          type="text"
+                          placeholder="Search locations..."
+                          value={searchTerm}
+                          onChange={e => setSearchTerm(e.target.value)}
+                          className="w-full bg-slate-600 rounded-lg pl-10 pr-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-400 text-white border border-slate-500"
+                        />
+                      </div>
+                    </div>
                     
                     <div className="p-2 border-b border-slate-600 flex justify-between">
                       <button
@@ -678,6 +573,59 @@ const Notification: React.FC = () => {
                       >
                         Clear all
                       </button>
+                    </div>
+                    
+                    {/* Manual Location Entry */}
+                    <div className="p-3 border-b border-slate-600">
+                      <button
+                        type="button"
+                        onClick={() => setShowManualEntry(!showManualEntry)}
+                        className="flex items-center gap-2 text-green-400 hover:text-green-300 transition w-full justify-center py-1"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>Add Custom Location</span>
+                      </button>
+                      
+                      {showManualEntry && (
+                        <form onSubmit={handleAddManualLocation} className="mt-3 space-y-3">
+                          <div>
+                            <label className="block text-white/80 text-sm mb-1">
+                              Location ID (number)
+                            </label>
+                            <input
+                              type="number"
+                              value={manualLocationId}
+                              onChange={e => setManualLocationId(e.target.value)}
+                              placeholder="Enter location ID"
+                              className="w-full bg-slate-600 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition border border-slate-500 text-sm"
+                              min="1"
+                              required
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-white/80 text-sm mb-1">
+                              Location Name
+                            </label>
+                            <input
+                              type="text"
+                              value={manualLocationName}
+                              onChange={e => setManualLocationName(e.target.value)}
+                              placeholder="Enter location name"
+                              className="w-full bg-slate-600 text-white rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-green-500/50 transition border border-slate-500 text-sm"
+                              required
+                            />
+                          </div>
+                          <div className="flex justify-end">
+                            <button
+                              type="submit"
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm transition-colors flex items-center gap-1"
+                            >
+                              <Plus className="h-3 w-3" />
+                              Add Location
+                            </button>
+                          </div>
+                        </form>
+                      )}
                     </div>
                     
                     <div className="max-h-60 overflow-y-auto">
@@ -711,28 +659,28 @@ const Notification: React.FC = () => {
               </div>
               
               {/* Selected Locations Display */}
-          {selectedLocations.length > 0 && (
-            <div className="mt-4">
-              <div className="flex flex-wrap gap-2">
-                {selectedLocations.map(location => (
-                  <div 
-                    key={location.ID}
-                    className="bg-blue-600/30 text-white px-3 py-1 rounded-full flex items-center gap-2 border border-blue-600/50"
-                  >
-                    <span className="text-sm">{location.Title} (ID: {location.ID})</span>
-                    <button 
-                      type="button"
-                      onClick={() => removeLocation(location.ID)}
-                      className="text-white/70 hover:text-white transition"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
+              {selectedLocations.length > 0 && (
+                <div className="mt-4">
+                  <div className="flex flex-wrap gap-2">
+                    {selectedLocations.map(location => (
+                      <div 
+                        key={location.ID}
+                        className="bg-blue-600/30 text-white px-3 py-1 rounded-full flex items-center gap-2 border border-blue-600/50"
+                      >
+                        <span className="text-sm">{location.Title}</span>
+                        <button 
+                          type="button"
+                          onClick={() => removeLocation(location.ID)}
+                          className="text-white/70 hover:text-white transition"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </div>
+              )}
             </div>
-          )}
-        </div>
 
             {/* Submit Button */}
             <button
@@ -756,7 +704,6 @@ const Notification: React.FC = () => {
               )}
             </button>
           </form>
-        <Notification />
         </div>
       </div>
     </div>

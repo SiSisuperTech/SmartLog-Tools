@@ -16,6 +16,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src", "src/api/aws-auth.js", "server", "hooks/server/api", "hooks/useAwsAuth.js", "server.js", "functions/analyse-logs.js"],
+  "include": ["src", "src/api/aws-auth.js", "server", "hooks/server/api", "hooks/useAwsAuth.js", "server.js"],
   "references": []
 }

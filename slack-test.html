@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Slack Webhook Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            max-height: 300px;
+            overflow: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Slack Webhook Test</h1>
+    
+    <div>
+        <h3>Direct to Slack</h3>
+        <button onclick="testDirectSlack()">Send Direct to Slack</button>
+        <div id="directResult"></div>
+    </div>
+
+    <div style="margin-top: 30px;">
+        <h3>Through Proxy Server</h3>
+        <button onclick="testProxySlack()">Send Through Proxy</button>
+        <div id="proxyResult"></div>
+    </div>
+
+    <script>
+        async function testDirectSlack() {
+            const resultDiv = document.getElementById('directResult');
+            resultDiv.innerHTML = '<p>Sending...</p>';
+            
+            try {
+                const webhookUrl = 'https://hooks.slack.com/services/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';
+                const payload = {
+                    text: "Test message from direct browser fetch"
+                };
+                
+                const response = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                
+                const text = await response.text();
+                resultDiv.innerHTML = `
+                    <p>Status: ${response.status}</p>
+                    <p>Response:</p>
+                    <pre>${text}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <p style="color: red;">Error:</p>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        }
+        
+        async function testProxySlack() {
+            const resultDiv = document.getElementById('proxyResult');
+            resultDiv.innerHTML = '<p>Sending...</p>';
+            
+            try {
+                const webhookUrl = 'https://hooks.slack.com/services/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';
+                const payload = {
+                    text: "Test message from proxy server"
+                };
+                
+                const response = await fetch('http://localhost:3005/api/proxy/slack', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        webhookUrl,
+                        payload
+                    })
+                });
+                
+                const data = await response.json();
+                resultDiv.innerHTML = `
+                    <p>Status: ${response.status}</p>
+                    <p>Response:</p>
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                `;
+            } catch (error) {
+                resultDiv.innerHTML = `
+                    <p style="color: red;">Error:</p>
+                    <pre>${error.message}</pre>
+                `;
+            }
+        }
+    </script>
+</body>
+</html> 

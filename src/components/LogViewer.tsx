@@ -22,11 +22,12 @@ export const LogViewer: React.FC<Props> = ({ logs = [], onAnalyze }) => {
     return baseClasses;
   };
 
-  // Helper function to format timestamp
+  // Helper function to format timestamp - Display in browser's timezone
   const formatTimestamp = (timestamp: string) => {
     try {
       const date = new Date(timestamp);
-      return date.toLocaleString();
+      // Display directly in local timezone without adjustments
+      return date.toLocaleString() + ' (Local time)';
     } catch (e) {
       return timestamp;
     }
@@ -61,7 +62,7 @@ export const LogViewer: React.FC<Props> = ({ logs = [], onAnalyze }) => {
       <table className="w-full">
         <thead className="bg-slate-700">
           <tr>
-            <th className="p-2 text-left text-xs uppercase text-slate-300 font-medium">Timestamp</th>
+            <th className="p-2 text-left text-xs uppercase text-slate-300 font-medium">Timestamp (Local)</th>
             <th className="p-2 text-left text-xs uppercase text-slate-300 font-medium">Message</th>
             <th className="p-2 text-left text-xs uppercase text-slate-300 font-medium">Stream</th>
           </tr>

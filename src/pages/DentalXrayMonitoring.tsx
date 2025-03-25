@@ -1,31 +1,48 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Search, 
-  X, 
-  AlertCircle, 
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+
+import {
+  ChevronLeft,
+  Search,
+  AlertCircle,
   RefreshCw,
   Download,
-  Sparkles,
+  Bell,
   FileText,
-  Camera,
-  Database,
-  Settings,
-  Eye,
-  EyeOff,
-  Layers,
-  Server,
+  AlertTriangle,
+  X,
   Calendar,
-  GitBranch,
-  Monitor,
-  BarChart3,
-  ArrowLeft,
+  Camera,
+  Settings,
+  Server,
   Users,
   HardDrive,
   Activity,
-  Clock,
   CheckCircle,
-  AlertTriangle
+  ChevronDown,
+  ChevronUp,
+  Monitor,
+  ArrowLeft,
+  ArrowRight,
+  Maximize2,
+  Minimize2,
+  Sun,
+  Moon,
+  Type,
+  Wrench,
+  Clock,
+  Shield,
+  Zap,
+  PieChart as PieChartIcon,
+  LineChart as LineChartIcon,
+  Heart,
+  Radio,
+  Cpu,
+  Workflow,
+  Upload,
+  BarChart as BarChartIcon
 } from 'lucide-react';
+
 import { 
   LineChart, 
   Line, 
@@ -41,10 +58,17 @@ import {
   BarChart,
   Bar,
   AreaChart,
-  Area
+  Area,
+  RadarChart,
+  PolarGrid,
+  PolarAngleAxis,
+  PolarRadiusAxis,
+  Radar
 } from 'recharts';
 
-// Define types for logs and configuration
+import { format, parseISO, subHours, subDays, isValid, differenceInDays } from 'date-fns';
+
+// Extended types to fix TypeScript errors
 interface LogEntry {
   timestamp: string;
   message: string;
@@ -53,10 +77,11 @@ interface LogEntry {
   id?: string;
 }
 
+// Interface for X-ray config structure
 interface XrayConfig {
   name: string;
   version: string;
-  dbConfig: {
+  dbConfig?: {
     server: string;
     port: number;
     database: string;
@@ -65,16 +90,11 @@ interface XrayConfig {
     ssl: boolean;
   };
   pmBridgePath: string;
-  romexisRadioPath: string;
+  romexisRadioPath?: string;
+  vatechDbFolderPath?: string;
+  carestreamRadioPath?: string;
+  isFormattedPatientIdMode?: boolean;
   isValid: boolean;
-}
-
-interface SessionInfo {
-  id: string;
-  type: string;
-  startTime: string;
-  username?: string;
-  location?: string;
 }
 
 interface TreatmentInfo {
@@ -82,435 +102,631 @@ interface TreatmentInfo {
   patientId: string;
   patientName: string;
   type: string;
+  success: boolean;
 }
 
-interface DentalXrayDashboardProps {
-  logs?: LogEntry[];
-  onBackClick?: () => void;
-}
+// Event types with categories and severities
+const EVENT_TYPES = [
+  { name: 'System Startup', category: 'system', severity: 'info' },
+  { name: 'X-ray Taken', category: 'operation', severity: 'info' },
+  { name: 'Configuration Change', category: 'system', severity: 'warning' },
+  { name: 'Patient Data Error', category: 'data', severity: 'error' },
+  { name: 'Connection Lost', category: 'network', severity: 'error' },
+  { name: 'Database Query', category: 'database', severity: 'info' },
+  { name: 'Software Update', category: 'system', severity: 'info' },
+  { name: 'User Login', category: 'security', severity: 'info' },
+  { name: 'Storage Warning', category: 'system', severity: 'warning' },
+  { name: 'Processing Error', category: 'operation', severity: 'error' }
+];
 
-const DentalXrayDashboard: React.FC<DentalXrayDashboardProps> = ({ 
-  logs: propLogs, 
-  onBackClick 
-}) => {
+// Health check categories
+const HEALTH_CATEGORIES = [
+  'Network', 'Database', 'Storage', 'Performance', 'Security'
+];
+
+// Enhanced color palette for visualizations
+const CHART_COLORS = [
+  '#3b82f6', '#ef4444', '#10b981', '#f59e0b', 
+  '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6',
+  '#84cc16', '#f97316'
+];
+
+const DentalXrayMonitoring: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  
+  // Extract locationId from URL query parameters
+  const queryParams = new URLSearchParams(location.search);
+  const locationId = queryParams.get('locationId');
+  
   // Core state
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [logSource, setLogSource] = useState<'aws' | 'manual' | 'query' | null>(null);
   
-  // Dashboard specific state
+  // UI state
+  const [expandedSections, setExpandedSections] = useState({
+    status: true,
+    health: true,
+    activity: true,
+    alerts: true
+  });
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [fontSize, setFontSize] = useState('normal');
+  const [darkMode, setDarkMode] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState<number | null>(30); // seconds
+  
+  // Monitoring state
   const [xrayConfig, setXrayConfig] = useState<XrayConfig | null>(null);
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [treatments, setTreatments] = useState<TreatmentInfo[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [locationName, setLocationName] = useState<string>('');
-  const [allisonVersion, setAllisonVersion] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'performance' | 'storage' | 'network'>('overview');
-  
-  // Feature toggles
-  const [showAiAnalysis, setShowAiAnalysis] = useState(true);
-  const [showFilters, setShowFilters] = useState(false);
-  const [showErrorsOnly, setShowErrorsOnly] = useState(false);
-  const [timeRange, setTimeRange] = useState<'all' | '24h' | '7d' | '30d'>('all');
-  const [showDetails, setShowDetails] = useState(false);
-  
-  // Analysis metrics
-  const [panoCount, setPanoCount] = useState(0);
-  const [errorCount, setErrorCount] = useState(0);
-  const [warningCount, setWarningCount] = useState(0);
-  const [sessionCount, setSessionCount] = useState(0);
-  
-  // Status and historical data
   const [systemStatus, setSystemStatus] = useState<'online' | 'offline' | 'warning' | 'error'>('online');
-  const [dailyStats, setDailyStats] = useState<{date: string, panos: number, errors: number}[]>([]);
-  const [snapshotStatus, setSnapshotStatus] = useState<string | null>(null);
-
-  // Colors for charts
-  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
-
-  // Use logs from props if provided, otherwise use mock data
-  useEffect(() => {
-    if (propLogs && propLogs.length > 0) {
-      setLogs(propLogs);
-      setFilteredLogs(propLogs);
-      extractSystemInfo(propLogs);
-      setIsLoading(false);
-    } else {
-      loadMockData();
+  const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
+  const [healthScores, setHealthScores] = useState<{category: string, score: number}[]>([]);
+  const [alerts, setAlerts] = useState<{id: string, message: string, severity: string, timestamp: string}[]>([]);
+  const [systemMetrics, setSystemMetrics] = useState({
+    xrayCount: 0,
+    patientCount: 0,
+    errorCount: 0,
+    warningCount: 0,
+    successRate: 0,
+    avgProcessingTime: 0
+  });
+  
+  // Format timestamp for display - Use browser's local timezone
+  const formatTimestamp = useCallback((timestamp: string): string => {
+    try {
+      const date = new Date(timestamp);
+      // Display directly in local timezone without adjustments
+      return date.toLocaleString() + ' (Local time)';
+    } catch (error) {
+      return timestamp;
     }
-  }, [propLogs]);
+  }, []);
 
-  // Load mock data for development/demonstration
-  const loadMockData = () => {
-    setIsLoading(true);
+  // Toggle section expansion
+  const toggleSection = useCallback((section: keyof typeof expandedSections) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [section]: !prev[section]
+    }));
+  }, []);
+
+  // Toggle full screen mode
+  const toggleFullScreen = useCallback(() => {
+    setIsFullScreen(prev => !prev);
+  }, []);
+
+  // Font size handler
+  const cycleFontSize = useCallback(() => {
+    setFontSize(prev => {
+      if (prev === 'small') return 'normal';
+      if (prev === 'normal') return 'large';
+      return 'small';
+    });
+  }, []);
+
+  // Get font size class
+  const getFontSizeClass = useCallback(() => {
+    switch (fontSize) {
+      case 'small': return 'text-xs';
+      case 'large': return 'text-lg';
+      default: return 'text-sm';
+    }
+  }, [fontSize]);
+  
+  // Parse timestamps with safety checks
+  const parseTimestamp = useCallback((timestamp: string): Date | null => {
+    if (!timestamp) return null;
     
-    // Mock logs for development
-    const mockLogs: LogEntry[] = [
-      {
-        timestamp: '2025-02-27T10:15:30',
-        message: 'System initialized',
-        severity: 'info'
+    try {
+      // First, ensure timestamp is in ISO format if it's in "YYYY-MM-DD HH:MM:SS" format
+      let isoTimestamp = timestamp;
+      if (typeof timestamp === 'string' && timestamp.includes(' ')) {
+        isoTimestamp = timestamp.replace(' ', 'T') + 'Z';
+      }
+      
+      // Regular Date parsing (works for ISO strings)
+      const date = new Date(isoTimestamp);
+      if (!isNaN(date.getTime())) {
+        return date;
+      }
+      
+      // Try numeric timestamp (milliseconds since epoch)
+      if (/^\\d+$/.test(String(timestamp))) {
+        const numericDate = new Date(parseInt(String(timestamp)));
+        if (!isNaN(numericDate.getTime())) {
+          return numericDate;
+        }
+      }
+      
+      return null;
+    } catch (e) {
+      console.error('Error parsing timestamp:', timestamp, e);
+      return null;
+    }
+  }, []);
+  
+  // Extract patient information from logs with proper pattern matching
+  const extractPatientData = useCallback((logEntries: LogEntry[]) => {
+    // Array to store valid treatments
+    const extractedTreatments: TreatmentInfo[] = [];
+    
+    // Regular expression to match proper patient name pattern (contains "****ddd****")
+    const patientNameRegex = /for\s+([A-Za-z*]+\d+[A-Za-z*]+)/;
+    
+    // Filter logs related to treatments and extract proper patient info
+    const treatmentLogs = logEntries.filter(log => 
+      log.message.includes('createTreatment') || 
+      log.message.includes('Treatment created')
+    );
+    
+    treatmentLogs.forEach((log, index) => {
+      const messageMatch = log.message.match(patientNameRegex);
+      
+      // Only count as a valid treatment if it matches the pattern
+      if (messageMatch) {
+        const patientName = messageMatch[1];
+        
+        // Verify the name follows the pattern with asterisks and digits
+        if (/[*]+\d+[*]+/.test(patientName)) {
+          extractedTreatments.push({
+            timestamp: log.timestamp,
+            patientId: `patient-${index}`,
+            patientName,
+            type: 'Panoramic X-ray',
+            success: !log.message.includes('failed') && !log.message.includes('error')
+          });
+        }
+      }
+    });
+    
+    return extractedTreatments;
+  }, []);
+  
+  // Process logs to extract system health metrics
+  const processSystemHealth = useCallback((logEntries: LogEntry[]) => {
+    // Count errors and warnings
+    const errors = logEntries.filter(log => log.severity === 'error');
+    const warnings = logEntries.filter(log => log.severity === 'warning');
+    
+    // Extract valid treatments using the pattern matching
+    const validTreatments = extractPatientData(logEntries);
+    
+    // Calculate processing times (where available)
+    const processingTimes: number[] = [];
+    logEntries.forEach(log => {
+      if (log.message.includes('Processing time:')) {
+        const match = log.message.match(/Processing time:\s*(\d+\.?\d*)(\s*s|ms)?/i);
+        if (match) {
+          let time = parseFloat(match[1]);
+          // Convert ms to seconds if necessary
+          if (match[2] && match[2].trim().toLowerCase() === 'ms') {
+            time /= 1000;
+          }
+          processingTimes.push(time);
+        }
+      }
+    });
+    
+    // Calculate success rate
+    const attemptedXrays = logEntries.filter(log => 
+      log.message.includes('Sending data') || 
+      log.message.includes('Processing X-ray') ||
+      log.message.includes('createTreatment')
+    ).length;
+    
+    const successRate = attemptedXrays > 0 
+      ? (validTreatments.length / attemptedXrays) * 100 
+      : 100;
+    
+    // Calculate average processing time
+    const avgProcessingTime = processingTimes.length > 0
+      ? processingTimes.reduce((sum, time) => sum + time, 0) / processingTimes.length
+      : 0;
+    
+    // Update system metrics
+    setSystemMetrics({
+      xrayCount: validTreatments.length,
+      patientCount: new Set(validTreatments.map(t => t.patientName)).size,
+      errorCount: errors.length,
+      warningCount: warnings.length,
+      successRate,
+      avgProcessingTime
+    });
+    
+    // Set treatments
+    setTreatments(validTreatments);
+    
+    // Generate health scores based on log analysis
+    const healthScores = [
+      { 
+        category: 'Network', 
+        score: calculateHealthScore(logEntries, 'network')
       },
-      {
-        timestamp: '2025-02-27T10:15:35',
-        message: 'Connected to RAYOS session',
-        severity: 'info'
+      { 
+        category: 'Database', 
+        score: calculateHealthScore(logEntries, 'database')
       },
-      {
-        timestamp: '2025-02-27T10:16:02',
-        message: 'createTreatment: Treatment created successfully for He**** AR**',
-        severity: 'info'
+      { 
+        category: 'Storage', 
+        score: calculateHealthScore(logEntries, 'storage')
       },
-      {
-        timestamp: '2025-02-27T10:18:15',
-        message: 'Configuration loaded: {"storeXraySoftware":{"name":"romexis","version":"5"},"conf":{"dbConfig":{"server":"localhost\\\\ROMEXIS","port":1433,"database":"Romexis_db","password":"romexis","user":"romexis","ssl":true},"pmBridgePath":"C:\\\\Program Files\\\\Planmeca\\\\Romexis\\\\pmbridge\\\\Program\\\\DxStartW.exe","romexisRadioPath":"E:\\\\romexis_images"},"isConfigurationValid":true}',
-        severity: 'info'
+      { 
+        category: 'Performance', 
+        score: successRate > 95 ? 90 : successRate > 85 ? 70 : 50
       },
-      {
-        timestamp: '2025-02-27T10:23:45',
-        message: 'createTreatment: Treatment created successfully for Jo**** SM**',
-        severity: 'info'
-      },
-      {
-        timestamp: '2025-02-27T10:30:12',
-        message: 'Database connection established',
-        severity: 'info'
-      },
-      {
-        timestamp: '2025-02-27T11:15:30',
-        message: 'createTreatment: Treatment created successfully for Ma**** WI**',
-        severity: 'info'
-      },
-      {
-        timestamp: '2025-02-27T11:42:15',
-        message: 'Error connecting to DICOM server',
-        severity: 'error'
-      },
-      {
-        timestamp: '2025-02-27T12:05:22',
-        message: 'createTreatment: Treatment created successfully for Sa**** JO**',
-        severity: 'info'
-      },
-      {
-        timestamp: '2025-02-27T12:33:45',
-        message: 'Low disk space warning',
-        severity: 'warning'
+      { 
+        category: 'Security', 
+        score: calculateHealthScore(logEntries, 'security')
       }
     ];
     
-    // Set timeout to simulate loading
-    setTimeout(() => {
-      setLogs(mockLogs);
-      setFilteredLogs(mockLogs);
-      
-      // Extract system information from logs
-      extractSystemInfo(mockLogs);
-      
-      // Set default location and version
-      setLocationName('North Clinic (ID: 12345)');
-      setAllisonVersion('3.5.2');
-      
-      setIsLoading(false);
-    }, 1000);
-  };
-
-  // Extract system information from logs
-  const extractSystemInfo = (logs: LogEntry[]) => {
-    // Extract X-ray configuration
-    const configLog = logs.find(log => log.message.includes('Configuration loaded'));
-    
-    if (configLog) {
-      try {
-        const configStart = configLog.message.indexOf('{');
-        const configData = JSON.parse(configLog.message.slice(configStart));
-        
-        setXrayConfig({
-          name: configData.storeXraySoftware.name,
-          version: configData.storeXraySoftware.version,
-          dbConfig: configData.conf.dbConfig,
-          pmBridgePath: configData.conf.pmBridgePath,
-          romexisRadioPath: configData.conf.romexisRadioPath,
-          isValid: configData.isConfigurationValid
-        });
-      } catch (error) {
-        console.error('Error parsing configuration:', error);
-      }
-    }
-    
-    // Extract sessions
-    const sessionLogs = logs.filter(log => log.message.includes('RAYOS session'));
-    const extractedSessions = sessionLogs.map((log, index) => ({
-      id: `session-${index}`,
-      type: 'RAYOS',
-      startTime: log.timestamp,
-      username: 'Admin', // Default, would be extracted from actual logs
-      location: locationName
-    }));
-    setSessions(extractedSessions);
-    setSessionCount(extractedSessions.length);
-    
-    // Extract treatments (panoramic X-rays)
-    const treatmentLogs = logs.filter(log => log.message.includes('createTreatment'));
-    const extractedTreatments = treatmentLogs.map((log, index) => {
-      // Extract patient name from message (format: "createTreatment: Treatment created successfully for Pa**** NA**")
-      const messageMatch = log.message.match(/for\s+([A-Za-z*]+\s+[A-Za-z*]+)/);
-      const patientName = messageMatch ? messageMatch[1] : 'Unknown Patient';
-      
-      return {
-        timestamp: log.timestamp,
-        patientId: `patient-${index}`,
-        patientName,
-        type: 'Panoramic X-ray'
-      };
-    });
-    setTreatments(extractedTreatments);
-    setPanoCount(extractedTreatments.length);
-    
-    // Count errors and warnings
-    setErrorCount(logs.filter(log => log.severity === 'error').length);
-    setWarningCount(logs.filter(log => log.severity === 'warning').length);
+    setHealthScores(healthScores);
     
     // Set system status based on errors/warnings
-    if (errorCount > 0) {
+    if (errors.length > 5) {
       setSystemStatus('error');
-    } else if (warningCount > 0) {
+    } else if (warnings.length > 10 || errors.length > 0) {
       setSystemStatus('warning');
     } else {
       setSystemStatus('online');
     }
     
-    // Generate daily stats
-    const today = new Date();
-    const dailyStatsMap: Record<string, {panos: number, errors: number}> = {};
+    // Generate alerts
+    const newAlerts = [
+      ...errors.slice(0, 5).map((log, index) => ({
+        id: `error-${index}`,
+        message: log.message,
+        severity: 'error',
+        timestamp: log.timestamp
+      })),
+      ...warnings.slice(0, 5).map((log, index) => ({
+        id: `warning-${index}`,
+        message: log.message,
+        severity: 'warning',
+        timestamp: log.timestamp
+      }))
+    ];
     
-    // Initialize the last 7 days
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(today.getDate() - i);
-      const dateKey = date.toISOString().split('T')[0];
-      dailyStatsMap[dateKey] = { panos: 0, errors: 0 };
+    // Sort by timestamp (newest first)
+    newAlerts.sort((a, b) => {
+      const dateA = parseTimestamp(a.timestamp) || new Date(0);
+      const dateB = parseTimestamp(b.timestamp) || new Date(0);
+      return dateB.getTime() - dateA.getTime();
+    });
+    
+    setAlerts(newAlerts);
+  }, [extractPatientData, parseTimestamp]);
+  
+  // Helper function to calculate health score based on log patterns
+  const calculateHealthScore = useCallback((logs: LogEntry[], category: string): number => {
+    // Define patterns for each category
+    const patterns: {[key: string]: RegExp[]} = {
+      network: [/network/i, /connection/i, /timeout/i, /socket/i, /offline/i],
+      database: [/database/i, /query/i, /sql/i, /db error/i],
+      storage: [/storage/i, /disk/i, /file/i, /space/i],
+      security: [/authentication/i, /login/i, /permission/i, /access/i],
+    };
+    
+    // Count relevant errors and warnings
+    const relevantLogs = logs.filter(log => 
+      (log.severity === 'error' || log.severity === 'warning') &&
+      patterns[category].some(pattern => pattern.test(log.message))
+    );
+    
+    // Calculate score (fewer errors = higher score)
+    const baseScore = 100;
+    const errorPenalty = 15; // Points to deduct per error
+    const warningPenalty = 5; // Points to deduct per warning
+    
+    const errors = relevantLogs.filter(log => log.severity === 'error').length;
+    const warnings = relevantLogs.filter(log => log.severity === 'warning').length;
+    
+    let score = baseScore - (errors * errorPenalty) - (warnings * warningPenalty);
+    
+    // Ensure score is between 0 and 100
+    return Math.max(0, Math.min(100, score));
+  }, []);
+  
+  // Get activity data for timeline visualization
+  const getActivityData = useMemo(() => {
+    const activityByHour: {[key: string]: number} = {};
+    
+    // Initialize all hours with 0
+    for (let i = 0; i < 24; i++) {
+      activityByHour[i] = 0;
     }
     
-    // Add actual data from logs
-    logs.forEach(log => {
+    // Count activities by hour
+    treatments.forEach(treatment => {
       try {
-        const date = new Date(log.timestamp);
-        const dateKey = date.toISOString().split('T')[0];
-        
-        // Only consider last 7 days
-        if (dailyStatsMap[dateKey]) {
-          if (log.message.includes('createTreatment')) {
-            dailyStatsMap[dateKey].panos++;
-          }
-          if (log.severity === 'error') {
-            dailyStatsMap[dateKey].errors++;
-          }
-        }
+        const date = new Date(treatment.timestamp);
+        const hour = date.getHours();
+        activityByHour[hour] = (activityByHour[hour] || 0) + 1;
       } catch (e) {
         // Skip invalid dates
       }
     });
     
     // Convert to array for chart
-    const dailyStatsArray = Object.entries(dailyStatsMap).map(([date, stats]) => ({
-      date,
-      ...stats
+    return Object.entries(activityByHour).map(([hour, count]) => ({
+      hour: `${hour}:00`,
+      xrays: count
     }));
+  }, [treatments]);
+  
+  // Get hourly error distribution
+  const getErrorDistribution = useMemo(() => {
+    const errorsByHour: {[key: string]: number} = {};
     
-    setDailyStats(dailyStatsArray);
-  };
-
-  // Filter logs based on search and filters
-  useEffect(() => {
-    if (logs.length === 0) return;
-    
-    let result = [...logs];
-    
-    // Apply search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      result = result.filter(log => 
-        log.message.toLowerCase().includes(term) || 
-        log.timestamp.toLowerCase().includes(term)
-      );
+    // Initialize all hours with 0
+    for (let i = 0; i < 24; i++) {
+      errorsByHour[i] = 0;
     }
     
-    // Apply errors only filter
-    if (showErrorsOnly) {
-      result = result.filter(log => log.severity === 'error');
-    }
-    
-    // Filter by time range
-    if (timeRange !== 'all') {
-      const now = new Date();
-      let cutoffDate = now;
-      
-      switch (timeRange) {
-        case '24h':
-          cutoffDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-          break;
-        case '7d':
-          cutoffDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-          break;
-        case '30d':
-          cutoffDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-          break;
-      }
-      
-      result = result.filter(log => {
-        try {
-          const logDate = new Date(log.timestamp);
-          return logDate >= cutoffDate;
-        } catch (e) {
-          return true; // Keep logs with invalid dates
-        }
-      });
-    }
-    
-    setFilteredLogs(result);
-  }, [logs, searchTerm, showErrorsOnly, timeRange]);
-
-  // Create snapshot function
-  const createSnapshot = () => {
-    try {
-      setSnapshotStatus('Creating snapshot...');
-      
-      // Prepare snapshot data
-      const snapshot = {
-        timestamp: new Date().toISOString(),
-        location: locationName,
-        allisonVersion,
-        xrayConfig,
-        stats: {
-          panoCount,
-          errorCount,
-          warningCount,
-          sessionCount
-        },
-        sessions,
-        treatments,
-        recentLogs: filteredLogs.slice(0, 10) // Include first 10 logs
-      };
-      
-      // Create and download JSON file
-      const blob = new Blob([JSON.stringify(snapshot, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `dental-xray-snapshot-${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-      
-      setSnapshotStatus('Snapshot created successfully!');
-      setTimeout(() => setSnapshotStatus(null), 3000);
-      
-    } catch (error) {
-      console.error('Error creating snapshot:', error);
-      setSnapshotStatus('Error creating snapshot: ' + (error instanceof Error ? error.message : String(error)));
-      setTimeout(() => setSnapshotStatus(null), 5000);
-    }
-  };
-
-  // Run advanced analysis
-  const runAdvancedAnalysis = () => {
-    setIsLoading(true);
-    
-    // In a real app, this would call an API endpoint
-    setTimeout(() => {
-      // Sample analysis results
-      const analysisResult = {
-        systemHealth: errorCount > 0 ? 'critical' : warningCount > 0 ? 'warning' : 'healthy',
-        recommendations: [
-          'Regular backups of patient data recommended',
-          'Update X-ray software to latest version',
-          'Check disk space on main server'
-        ],
-        errorPatterns: [
-          { type: 'Connection', count: errorCount > 0 ? 1 : 0 },
-          { type: 'Database', count: 0 },
-          { type: 'Storage', count: warningCount > 0 ? 1 : 0 }
-        ],
-        performance: {
-          responseTime: '120ms',
-          databaseQueries: '250/hr',
-          imageProcessingTime: '3.2s'
-        }
-      };
-      
-      // Display results in an alert dialog
-      alert(
-        `Advanced Analysis Results:\n\n` +
-        `System Health: ${analysisResult.systemHealth}\n\n` +
-        `Recommendations:\n${analysisResult.recommendations.join('\n')}\n\n` +
-        `Performance Metrics:\n` +
-        `- Response Time: ${analysisResult.performance.responseTime}\n` +
-        `- Database Queries: ${analysisResult.performance.databaseQueries}\n` +
-        `- Image Processing: ${analysisResult.performance.imageProcessingTime}`
-      );
-      
-      setIsLoading(false);
-    }, 2000);
-  };
-
-  // Format timestamp for display
-  const formatTimestamp = (timestamp: string): string => {
-    try {
-      const date = new Date(timestamp);
-      return date.toLocaleString();
-    } catch (error) {
-      return timestamp;
-    }
-  };
-
-  // Calculate performance metrics
-  const performanceMetrics = useMemo(() => {
-    // Calculate success rate
-    const attempts = logs.filter(log => log.message.includes('Sending data to API for')).length;
-    const successes = logs.filter(log => log.message.includes('Treatment created successfully')).length;
-    const successRate = attempts > 0 ? successes / attempts : 1;
-    
-    // Calculate avg processing time (mock data for demo)
-    const avgProcessingTime = 7.2;
-    
-    // Calculate average file size from logs if available
-    let totalFileSize = 0;
-    let fileCount = 0;
-    
-    logs.forEach(log => {
-      if (log.message.includes('uploaded file') && log.message.includes('size:')) {
-        const sizeMatch = log.message.match(/size:\s+(\d+)/);
-        if (sizeMatch) {
-          const size = parseInt(sizeMatch[1], 10) / (1024 * 1024); // Convert to MB
-          totalFileSize += size;
-          fileCount++;
-        }
+    // Count errors by hour
+    logs.filter(log => log.severity === 'error').forEach(log => {
+      try {
+        const date = new Date(log.timestamp);
+        const hour = date.getHours();
+        errorsByHour[hour] = (errorsByHour[hour] || 0) + 1;
+      } catch (e) {
+        // Skip invalid dates
       }
     });
     
-    const avgFileSize = fileCount > 0 ? totalFileSize / fileCount : 7.5; // Default to 7.5MB if no data
-    
-    return {
-      successRate,
-      avgProcessingTime,
-      avgFileSize
-    };
+    // Convert to array for chart
+    return Object.entries(errorsByHour).map(([hour, count]) => ({
+      hour: `${hour}:00`,
+      errors: count
+    }));
   }, [logs]);
+  
+  // Normalize log timestamps for consistency
+  const normalizeLogTimestamps = useCallback((inputLogs: LogEntry[]): LogEntry[] => {
+    return inputLogs.map(log => {
+      // Handle CloudWatch timestamp format
+      if (log.timestamp && typeof log.timestamp === 'string' && log.timestamp.includes(' ')) {
+        return {
+          ...log,
+          timestamp: log.timestamp.replace(' ', 'T') + 'Z'
+        };
+      }
+      return log;
+    });
+  }, []);
+  
+  // Load logs on component mount
+  useEffect(() => {
+    // Function to load real logs from CloudWatch
+    const loadLogs = async () => {
+      setIsLoading(true);
+      setError(null);
+      
+      console.log("Loading X-ray monitoring data. LocationId:", locationId);
+      
+      try {
+        // Check if we have monitoring data in local storage for this clinic
+        let monitoringData = null;
+        try {
+          const monitoringDataStr = localStorage.getItem('monitoredClinicsData');
+          if (monitoringDataStr) {
+            const allData = JSON.parse(monitoringDataStr);
+            
+            // Find the clinic with this locationId
+            const matchingClinic = allData.find((clinic: any) => 
+              clinic.locationId === locationId
+            );
+            
+            if (matchingClinic) {
+              console.log(`Found clinic in monitoring data: ${matchingClinic.name}`);
+              
+              // Check for xrayDataCache in sessionStorage
+              const xrayDataCacheStr = sessionStorage.getItem('xrayDataCache');
+              if (xrayDataCacheStr && locationId) {
+                try {
+                  const xrayDataCache = JSON.parse(xrayDataCacheStr);
+                  if (xrayDataCache && xrayDataCache[locationId]) {
+                    console.log(`Found ${xrayDataCache[locationId].length} treatments in xrayDataCache for locationId ${locationId}`);
+                    
+                    // Create log entries from treatment data
+                    const treatmentLogs: LogEntry[] = xrayDataCache[locationId].map((treatment: any) => ({
+                      timestamp: treatment.timestamp,
+                      message: `${treatment.success ? 'Successfully processed' : 'Failed to process'} ${treatment.type} X-ray for patient ${treatment.patientName} (ID: ${treatment.patientId})`,
+                      severity: treatment.success ? 'info' : 'error',
+                      id: `log-${treatment.id}`
+                    }));
+                    
+                    setLogs(treatmentLogs);
+                    setFilteredLogs(treatmentLogs);
+                    processSystemHealth(treatmentLogs);
+                    
+                    // Set log source to indicate data origin
+                    setLogSource('query');
+                    
+                    // Update timestamps
+                    setLastUpdated(new Date());
+                    
+                    // Early return - we have data
+                    setIsLoading(false);
+                    return;
+                  }
+                } catch (e) {
+                  console.error('Error parsing xrayDataCache:', e);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.error('Error checking local storage:', e);
+        }
+        
+        // If no data found in cache, query AWS CloudWatch logs
+        if (locationId) {
+          console.log('No data found in cache. Querying AWS CloudWatch logs for locationId:', locationId);
+          
+          const nowMs = Date.now();
+          const oneDayAgoMs = nowMs - (24 * 60 * 60 * 1000);
+          
+          try {
+            // Make API request to get logs from CloudWatch
+            const response = await fetch('/api/logs', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                startTime: oneDayAgoMs,
+                endTime: nowMs,
+                locationIds: [locationId],
+                version: '2.4.5', // Use the correct version or make configurable
+                limit: 1000
+              })
+            });
+            
+            if (!response.ok) {
+              throw new Error(`Failed to fetch logs: ${response.status} ${response.statusText}`);
+            }
+            
+            const logsData = await response.json();
+            
+            if (logsData.results && Array.isArray(logsData.results)) {
+              console.log(`Received ${logsData.results.length} log entries from AWS CloudWatch`);
+              
+              // Transform CloudWatch logs into application format
+              const fetchedLogs: LogEntry[] = logsData.results.map((logEntry: any, index: number) => {
+                try {
+                  // Handle different CloudWatch log formats
+                  let message: string = '';
+                  let timestamp: string = '';
+                  
+                  if (Array.isArray(logEntry)) {
+                    // Format 1: Array of field objects [{field: '@timestamp', value: '...'}, {field: '@message', value: '...'}]
+                    const messageField = logEntry.find((field: any) => field.field === '@message');
+                    const timestampField = logEntry.find((field: any) => field.field === '@timestamp');
+                    
+                    message = messageField?.value || '';
+                    timestamp = timestampField?.value || new Date().toISOString();
+                  } else if (typeof logEntry === 'object' && logEntry !== null) {
+                    // Format 2: Object with direct properties
+                    message = logEntry.message || logEntry['@message'] || '';
+                    timestamp = logEntry.timestamp || logEntry['@timestamp'] || new Date().toISOString();
+                  } else {
+                    // String format or unexpected format
+                    console.warn('Unexpected log entry format:', logEntry);
+                    message = String(logEntry);
+                    timestamp = new Date().toISOString();
+                  }
+                  
+                  // Determine severity based on message content
+                  let severity = 'info';
+                  if (message.includes('error') || message.includes('failed') || message.includes('Failed')) {
+                    severity = 'error';
+                  } else if (message.includes('warning') || message.includes('Warning')) {
+                    severity = 'warning';
+                  }
+                  
+                  return {
+                    id: `log-${index}-${Date.now()}`,
+                    timestamp,
+                    message,
+                    severity
+                  };
+            } catch (error) {
+                  console.error('Error processing log entry:', error, logEntry);
+                  // Return a fallback log entry
+                  return {
+                    id: `log-error-${index}-${Date.now()}`,
+                    timestamp: new Date().toISOString(),
+                    message: 'Error processing log entry',
+                    severity: 'error'
+                  };
+                }
+              });
+              
+              // Normalize timestamps for consistency
+              const normalizedLogs = normalizeLogTimestamps(fetchedLogs);
+          
+          // Set the logs
+              setLogs(normalizedLogs);
+              setFilteredLogs(normalizedLogs);
+              processSystemHealth(normalizedLogs);
+              setLogSource('query');
+              console.log(`Processed ${normalizedLogs.length} log entries from AWS CloudWatch`);
+        
+        setLastUpdated(new Date());
+              setIsLoading(false);
+              return;
+            } else {
+              console.warn('No results found in CloudWatch logs response');
+            }
+          } catch (error) {
+            console.error('Error fetching CloudWatch logs:', error);
+            // Continue to fallback for demo/testing purposes
+          }
+        }
+        
+        // Only set a small delay to show loading state
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 1000);
+      } catch (error) {
+        console.error('Error loading logs:', error);
+        setError(`Failed to load logs: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        setLogs([]);
+        setFilteredLogs([]);
+          setIsLoading(false);
+      }
+    };
 
-  // Loading state
+    loadLogs();
+    
+    // Set up refresh interval if enabled
+    let intervalId: NodeJS.Timeout | null = null;
+    if (refreshInterval) {
+      intervalId = setInterval(() => {
+        loadLogs();
+      }, refreshInterval * 1000);
+    }
+    
+    // Clean up interval on unmount
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [normalizeLogTimestamps, parseTimestamp, processSystemHealth, refreshInterval, locationId]);
+  
+  // Loading state with logo
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
+        <div className="w-24 h-24 mb-6 relative">
+          {/* Logo - X-ray stylized logo */}
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full opacity-20 animate-pulse"></div>
+          <div className="absolute inset-2 bg-slate-900 rounded-full"></div>
+          <div className="absolute inset-0 flex items-center justify-center">
+            <Radio className="w-12 h-12 text-blue-400" />
+          </div>
+        </div>
+        
         <div className="text-center">
-          <RefreshCw className="w-12 h-12 text-blue-500 animate-spin mx-auto mb-4" />
-          <h2 className="text-xl text-white font-medium">Loading Dashboard...</h2>
+          <h2 className="text-xl text-white font-medium mb-2">Loading X-ray Monitoring</h2>
+          {locationId && (
+            <p className="text-slate-400 mb-4">Loading data for clinic ID: {locationId}</p>
+          )}
+          <div className="flex items-center justify-center">
+            <div className="h-1 w-48 bg-slate-700 rounded-full overflow-hidden">
+              <div className="h-full bg-blue-500 animate-progress-indeterminate"></div>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
-
+  
   // Error state
   if (error) {
     return (
@@ -529,837 +745,718 @@ const DentalXrayDashboard: React.FC<DentalXrayDashboardProps> = ({
       </div>
     );
   }
-
+  
+  // No logs state
+  if (!logs.length) {
+    return (
+      <div className="min-h-screen bg-slate-900 p-6 text-white flex items-center justify-center">
+        <div className="max-w-md w-full bg-slate-800 rounded-2xl p-8 shadow-xl border border-slate-700 text-center">
+          <AlertCircle className="w-16 h-16 mx-auto text-amber-400 mb-6" />
+          <h2 className="text-2xl font-semibold mb-4">No Data Available</h2>
+          <p className="text-slate-300 mb-6">
+            There are no logs available for monitoring. Please upload logs or query a log source.
+          </p>
+          <div className="flex flex-wrap justify-center gap-4">
+            <button
+              onClick={() => navigate('/log-query')}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
+            >
+              Query Logs
+            </button>
+            <button
+              onClick={() => navigate('/log-analysis')}
+              className="bg-slate-600 text-white px-4 py-2 rounded-lg hover:bg-slate-700 transition"
+            >
+              Back to Analysis
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  
   return (
-    <div className="bg-slate-800 rounded-xl p-5 border border-slate-700">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold flex items-center">
-          <Monitor className="w-5 h-5 mr-2 text-blue-400" />
-          Dental X-ray System Dashboard
-          <span 
-            className={`ml-3 px-2 py-1 rounded-full text-xs ${
-              systemStatus === 'online' ? 'bg-green-500 text-green-100' :
-              systemStatus === 'warning' ? 'bg-yellow-500 text-yellow-100' :
-              'bg-red-500 text-red-100'
-            }`}
-          >
-            {systemStatus === 'online' ? 'ONLINE' : 
-              systemStatus === 'warning' ? 'WARNING' : 'ERROR'}
-          </span>
-        </h2>
-        
-        {onBackClick && (
-          <button
-            onClick={onBackClick}
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg transition text-sm"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Log View
-          </button>
-        )}
-      </div>
-      
-      {/* Header Info and Controls */}
-      <div className="mb-6 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-slate-700/50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-2 flex items-center">
-            <Settings className="w-4 h-4 mr-2 text-blue-400" />
-            Location Information
-          </h3>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span className="text-slate-400">Location:</span>
-              <span className="font-medium">{locationName}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Allison Version:</span>
-              <span className="font-medium">{allisonVersion}</span>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-slate-700/50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-2 flex items-center">
-            <Calendar className="w-4 h-4 mr-2 text-blue-400" />
-            Time Range
-          </h3>
-          <select 
-            value={timeRange}
-            onChange={(e) => setTimeRange(e.target.value as any)}
-            className="w-full bg-slate-600 border border-slate-500 rounded-lg p-2 text-white"
-          >
-            <option value="all">All Time</option>
-            <option value="24h">Last 24 Hours</option>
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-          </select>
-        </div>
-        
-        <div className="bg-slate-700/50 rounded-lg p-4">
-          <h3 className="text-lg font-medium mb-2 flex items-center">
-            <Download className="w-4 h-4 mr-2 text-blue-400" />
-            Actions
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={createSnapshot}
-              className="flex-1 px-3 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm"
+    <div className={`min-h-screen ${darkMode ? 'bg-slate-900' : 'bg-gray-100'} ${isFullScreen ? 'p-0' : 'p-4 md:p-6'} ${darkMode ? 'text-white' : 'text-gray-900'} transition-all duration-300`}>
+      <div className={`${isFullScreen ? 'max-w-full' : 'max-w-6xl'} mx-auto`}>
+        {/* Header */}
+        <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
+          <div className="flex items-center">
+            <button 
+              onClick={() => navigate('/log-analysis')}
+              className={`mr-4 ${darkMode ? 'text-white/80 hover:text-white' : 'text-gray-600 hover:text-gray-900'} transition-colors`}
             >
-              <Download className="w-4 h-4 inline mr-1" />
-              Snapshot
+              <ChevronLeft className="w-5 h-5" />
             </button>
-            <button
-              onClick={runAdvancedAnalysis}
-              className="flex-1 px-3 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition text-sm"
-            >
-              <Sparkles className="w-4 h-4 inline mr-1" />
-              Analysis
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      {/* Tab Navigation */}
-      <div className="flex mb-6 border-b border-slate-700">
-        <button
-          onClick={() => setActiveTab('overview')}
-          className={`px-4 py-2 ${
-            activeTab === 'overview' 
-              ? 'border-b-2 border-blue-500 text-blue-400' 
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          System Overview
-        </button>
-        <button
-          onClick={() => setActiveTab('performance')}
-          className={`px-4 py-2 ${
-            activeTab === 'performance' 
-              ? 'border-b-2 border-blue-500 text-blue-400' 
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Performance
-        </button>
-        <button
-          onClick={() => setActiveTab('storage')}
-          className={`px-4 py-2 ${
-            activeTab === 'storage' 
-              ? 'border-b-2 border-blue-500 text-blue-400' 
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Storage
-        </button>
-        <button
-          onClick={() => setActiveTab('network')}
-          className={`px-4 py-2 ${
-            activeTab === 'network' 
-              ? 'border-b-2 border-blue-500 text-blue-400' 
-              : 'text-slate-400 hover:text-white'
-          }`}
-        >
-          Network
-        </button>
-      </div>
-      
-      {/* Tab Content */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          {/* System Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-  <div className="bg-blue-900/20 rounded-lg p-4">
-    <div className="flex items-center gap-2 text-blue-400 mb-2">
-      <Camera className="w-4 h-4" />
-      <span className="text-sm font-medium">X-rays Taken</span>
-    </div>
-    <div className="text-2xl font-bold">{panoCount}</div>
-    <div className="text-xs text-blue-300/70 mt-1">
-      {timeRange === 'all' ? 'All time' : `Last ${timeRange}`}
-    </div>
-  </div>
-  
-  <div className="bg-purple-900/20 rounded-lg p-4">
-    <div className="flex items-center gap-2 text-purple-400 mb-2">
-      <Users className="w-4 h-4" />
-      <span className="text-sm font-medium">Patients</span>
-    </div>
-    <div className="text-2xl font-bold">{treatments.length}</div>
-    <div className="text-xs text-purple-300/70 mt-1">
-      Unique patients processed
-    </div>
-  </div>
-  
-  <div className="bg-red-900/20 rounded-lg p-4">
-    <div className="flex items-center gap-2 text-red-400 mb-2">
-      <Activity className="w-4 h-4" />
-      <span className="text-sm font-medium">Errors</span>
-    </div>
-    <div className="text-2xl font-bold">{errorCount}</div>
-    <div className="text-xs text-red-300/70 mt-1">
-      {warningCount} warnings
-    </div>
-  </div>
-  
-  <div className="bg-amber-900/20 rounded-lg p-4">
-    <div className="flex items-center gap-2 text-amber-400 mb-2">
-      <Calendar className="w-4 h-4" />
-      <span className="text-sm font-medium">Last Active</span>
-    </div>
-    <div className="text-md font-bold">
-      {logs.length > 0 
-        ? formatTimestamp(logs.sort((a, b) => 
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-          )[0].timestamp)
-        : 'N/A'
-      }
-    </div>
-  </div>
-</div>
-          
-          {/* System Configuration */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-lg font-medium flex items-center">
-                <Server className="w-4 h-4 mr-2 text-blue-400" />
-                System Configuration
-              </h3>
-              
-              <button 
-                onClick={() => setShowDetails(!showDetails)}
-                className="text-sm text-slate-400 hover:text-white"
+            <h1 className="text-2xl font-semibold flex items-center">
+              <Monitor className="w-6 h-6 mr-2 text-blue-400" />
+              Dental X-ray Monitoring
+              <span 
+                className={`ml-3 px-2 py-1 rounded-full text-xs ${
+                  systemStatus === 'online' ? 'bg-green-500 text-green-100' :
+                  systemStatus === 'warning' ? 'bg-yellow-500 text-yellow-100' :
+                  'bg-red-500 text-red-100'
+                }`}
               >
-                {showDetails ? 'Hide Details' : 'Show Details'}
+                {systemStatus === 'online' ? 'ONLINE' : 
+                  systemStatus === 'warning' ? 'WARNING' : 'ERROR'}
+              </span>
+            </h1>
+          </div>
+          
+          <div className="flex items-center gap-2">
+            {logSource && (
+              <span className="px-2 py-1 bg-blue-500/20 text-blue-300 rounded-full text-xs uppercase">
+                {logSource}
+              </span>
+            )}
+            
+            <span className={`text-${darkMode ? 'slate-400' : 'gray-500'} text-sm`}>
+              Last updated: {lastUpdated.toLocaleTimeString()}
+            </span>
+            
+            {/* Tool buttons */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={toggleFullScreen}
+                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-gray-100 border border-gray-300'} transition`}
+                title={isFullScreen ? "Exit Full Screen" : "Full Screen Mode"}
+              >
+                {isFullScreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+              </button>
+              
+              <button
+                onClick={() => setDarkMode(!darkMode)}
+                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-gray-100 border border-gray-300'} transition`}
+                title={darkMode ? "Light Mode" : "Dark Mode"}
+              >
+                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </button>
+              
+              <button
+                onClick={cycleFontSize}
+                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-700 hover:bg-slate-600' : 'bg-white hover:bg-gray-100 border border-gray-300'} transition`}
+                title="Change Font Size"
+              >
+                <Type className="w-4 h-4" />
+              </button>
+              
+              <select
+                value={refreshInterval || ''}
+                onChange={(e) => setRefreshInterval(e.target.value ? parseInt(e.target.value) : null)}
+                className={`p-2 rounded-lg ${darkMode ? 'bg-slate-700 text-white border-slate-600' : 'bg-white text-gray-900 border-gray-300'} border`}
+              >
+                <option value="">Manual Refresh</option>
+                <option value="15">Refresh: 15s</option>
+                <option value="30">Refresh: 30s</option>
+                <option value="60">Refresh: 1m</option>
+                <option value="300">Refresh: 5m</option>
+              </select>
+              
+              <button
+                onClick={() => {
+                  setLastUpdated(new Date());
+                  window.location.reload();
+                }}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 transition flex items-center gap-2 text-sm rounded-lg"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Refresh
               </button>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Software Info */}
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium flex items-center gap-2 mb-2">
-                  <Server className="w-4 h-4" />
-                  X-ray Software
-                </h4>
-                
-                {xrayConfig ? (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Name:</span>
-                      <span className="text-white font-medium capitalize">{xrayConfig.name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Version:</span>
-                      <span className="text-white font-medium">{xrayConfig.version}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Status:</span>
-                      <span className={`font-medium ${xrayConfig.isValid ? 'text-green-500' : 'text-red-500'}`}>
-                        {xrayConfig.isValid ? 'Valid Configuration' : 'Invalid Configuration'}
-                      </span>
-                    </div>
-                    {showDetails && (
-                      <div className="mt-2 pt-2 border-t border-slate-700">
-                        <div className="text-xs text-slate-400 mb-1">Bridge Path:</div>
-                        <div className="bg-slate-700/50 p-1 rounded text-xs overflow-x-auto whitespace-nowrap">
-                          {xrayConfig.pmBridgePath}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-slate-400 text-sm">Software information not available</p>
-                )}
-              </div>
-              {/* Add this section to the System tab */}
-<div className="bg-slate-700/50 rounded-lg p-4">
-  <h3 className="text-lg font-medium mb-3">Complete Configuration</h3>
-  
-  {xrayConfig ? (
-    <div className="space-y-3">
-      {/* Configuration Validity Status */}
-      <div className={`p-3 rounded-lg border ${xrayConfig.isValid ? 'bg-green-900/30 border-green-700' : 'bg-red-900/30 border-red-700'}`}>
-        <div className="flex items-center gap-2">
-          {xrayConfig.isValid 
-            ? <CheckCircle className="w-5 h-5 text-green-500" /> 
-            : <AlertTriangle className="w-5 h-5 text-red-500" />
-          }
-          <span className="font-medium">
-            Configuration is {xrayConfig.isValid ? 'valid' : 'invalid'}
-          </span>
-        </div>
-        <div className="mt-1 text-sm">
-          Last updated: {formatTimestamp(logs.find(log => log.message.includes('Configuration loaded'))?.timestamp || '')}
-        </div>
-      </div>
-      
-      {/* Full Configuration JSON */}
-      <div className="mt-3">
-        <div className="text-slate-300 font-medium mb-2">Raw Configuration Data:</div>
-        <pre className="bg-slate-800 p-3 rounded-lg overflow-x-auto text-xs">
-          {JSON.stringify(xrayConfig, null, 2)}
-        </pre>
-      </div>
-    </div>
-  ) : (
-    <p className="text-slate-400 text-sm py-2">Configuration information not available</p>
-  )}
-</div>
-
-{/* Recent Logs Section */}
-<div className="bg-slate-700/50 rounded-lg p-4 mt-6">
-  <h3 className="text-lg font-medium mb-3">Recent System Logs</h3>
-  
-  <div className="space-y-2 max-h-96 overflow-y-auto">
-    {logs.slice(0, 10).map((log, index) => (
-      <div 
-        key={index} 
-        className={`p-2 rounded-lg ${
-          log.severity === 'error' ? 'bg-red-900/20 border border-red-500/30' : 
-          log.severity === 'warning' ? 'bg-yellow-900/20 border border-yellow-500/30' :
-          'bg-slate-700/50 border border-slate-600/30'
-        }`}
-      >
-        <div className="text-xs text-slate-400 mb-1">{formatTimestamp(log.timestamp)}</div>
-        <div className="text-sm">{log.message}</div>
-      </div>
-    ))}
-  </div>
-</div>
-              {/* Database Info */}
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium flex items-center gap-2 mb-2">
-                  <Database className="w-4 h-4" />
-                  Database Configuration
-                </h4>
-                
-                {xrayConfig?.dbConfig ? (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Server:</span>
-                      <span className="text-white">{xrayConfig.dbConfig.server}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">Database:</span>
-                      <span className="text-white">{xrayConfig.dbConfig.database}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-slate-400">SSL:</span>
-                      <span className="text-white">{xrayConfig.dbConfig.ssl ? 'Enabled' : 'Disabled'}</span>
-                    </div>
-                    {showDetails && (
-                      <div className="mt-2 pt-2 border-t border-slate-700">
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">Port:</span>
-                          <span className="text-white">{xrayConfig.dbConfig.port}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-slate-400">User:</span>
-                          <span className="text-white">{xrayConfig.dbConfig.user}</span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-slate-400 text-sm">Database information not available</p>
-                )}
-              </div>
-            </div>
           </div>
-          
-          {/* X-ray Activity Chart */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">X-ray Activity (7 Days)</h3>
-            
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={dailyStats} margin={{ top: 5, right: 5, left: 0, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#94a3b8"
-                    tick={{ fontSize: 12 }}
-                    tickFormatter={(value) => {
-                      const parts = value.split('-');
-                      return `${parts[1]}/${parts[2]}`;
-                    }}
-                  />
-                  <YAxis stroke="#94a3b8" tick={{ fontSize: 12 }} />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1e293b', 
-                      border: '1px solid #334155',
-                      borderRadius: '0.375rem'
-                    }}
-                  />
-                  <Legend />
-                  <Line 
-                    type="monotone" 
-                    dataKey="panos" 
-                    name="X-rays" 
-                    stroke="#3b82f6" 
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                    activeDot={{ r: 6 }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="errors" 
-                    name="Errors" 
-                    stroke="#ef4444" 
-                    strokeWidth={2}
-                    dot={{ r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-          
-          {/* Recent Treatments */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3 flex items-center">
-              <Camera className="w-4 h-4 mr-2 text-blue-400" />
-              Recent X-rays
-            </h3>
-            
-            {treatments.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left border-b border-slate-600">
-                      <th className="pb-2 text-slate-400 font-medium">Timestamp</th>
-                      <th className="pb-2 text-slate-400 font-medium">Patient</th>
-                      <th className="pb-2 text-slate-400 font-medium">Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {treatments.slice(0, 5).map((treatment, index) => (
-                      <tr key={index} className="border-b border-slate-700 hover:bg-slate-700/30">
-                        <td className="py-2">{formatTimestamp(treatment.timestamp)}</td>
-                        <td className="py-2">{treatment.patientName}</td>
-                        <td className="py-2">
-                          <span className="px-2 py-0.5 bg-blue-900/30 text-blue-400 rounded-full text-xs">
-                            {treatment.type}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+        </div>
+        
+        {/* Real-time Status Section */}
+        <div className={`mb-6 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'} rounded-xl border`}>
+          <div 
+            className="p-4 flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection('status')}
+          >
+            <h2 className="text-lg font-semibold flex items-center">
+              <Activity className="w-5 h-5 mr-2 text-blue-400" />
+              Real-time System Status
+            </h2>
+            {expandedSections.status ? (
+              <ChevronUp className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
             ) : (
-              <div className="text-center py-4 text-slate-400">
-                No treatments found
-              </div>
+              <ChevronDown className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
             )}
           </div>
-        </div>
-      )}
-      
-      {activeTab === 'performance' && (
-        <div className="space-y-6">
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">Processing Performance</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-teal-900/20 rounded-lg p-4">
-                <div className="text-teal-400 text-sm font-medium mb-2">Average Processing Time</div>
-                <div className="text-2xl font-bold">
-                  {performanceMetrics.avgProcessingTime.toFixed(1)}s
-                </div>
-                <div className="mt-2 text-xs text-teal-300/70">
-                  Time from detection to successful upload
-                </div>
-              </div>
-              
-              <div className="bg-blue-900/20 rounded-lg p-4">
-                <div className="text-blue-400 text-sm font-medium mb-2">Success Rate</div>
-                <div className="text-2xl font-bold">
-                  {(performanceMetrics.successRate * 100).toFixed(1)}%
-                </div>
-                <div className="mt-2 text-xs text-blue-300/70">
-                  X-ray processing completion rate
-                </div>
-              </div>
-              
-              <div className="bg-purple-900/20 rounded-lg p-4">
-                <div className="text-purple-400 text-sm font-medium mb-2">Average File Size</div>
-                <div className="text-2xl font-bold">
-                  {performanceMetrics.avgFileSize.toFixed(1)} MB
-                </div>
-                <div className="mt-2 text-xs text-purple-300/70">
-                  Average X-ray image size
-                </div>
-              </div>
-            </div>
-          </div>
           
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">System Activity</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium mb-2">Authentication</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Sessions:</span>
-                    <span className="font-medium">{sessionCount}</span>
+          {expandedSections.status && (
+            <div className={`p-4 pt-0 border-t ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+              {/* Key Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <div className={`${darkMode ? 'bg-blue-900/20' : 'bg-blue-50 border border-blue-100'} rounded-lg p-4`}>
+                  <div className={`flex items-center gap-2 ${darkMode ? 'text-blue-400' : 'text-blue-700'} mb-2`}>
+                    <Camera className="w-4 h-4" />
+                    <span className="text-sm font-medium">X-rays Taken</span>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Token Refreshes:</span>
-                    <span className="font-medium">
-                      {logs.filter(log => log.message.includes('Token refreshed')).length}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium mb-2">System Status</h4>
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Restarts:</span>
-                    <span className="font-medium">
-                      {logs.filter(log => log.message.includes('Restarting app')).length}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Errors:</span>
-                    <span className="font-medium">{errorCount}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">Performance Assessment</h3>
-            
-            <div className="space-y-3">
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm">Processing Speed</span>
-                  <span className="text-sm text-blue-400">
-                    {performanceMetrics.avgProcessingTime < 8 ? 'Good' : 
-                     performanceMetrics.avgProcessingTime < 15 ? 'Average' : 'Slow'}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div 
-                    className="h-2 rounded-full bg-blue-500" 
-                    style={{ 
-                      width: `${Math.min(100, 100 - (performanceMetrics.avgProcessingTime / 20 * 100))}%` 
-                    }}
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm">Success Rate</span>
-                  <span className="text-sm text-green-400">
-                    {performanceMetrics.successRate >= 0.98 ? 'Excellent' :
-                     performanceMetrics.successRate >= 0.9 ? 'Good' :
-                     performanceMetrics.successRate >= 0.8 ? 'Average' : 'Poor'}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div 
-                    className="h-2 rounded-full bg-green-500" 
-                    style={{ width: `${performanceMetrics.successRate * 100}%` }}
-                  />
-                </div>
-              </div>
-              
-              <div>
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-sm">System Health</span>
-                  <span className="text-sm text-purple-400">
-                    {errorCount === 0 ? 'Optimal' :
-                     errorCount < 5 ? 'Good' :
-                     errorCount < 10 ? 'Average' : 'Needs Attention'}
-                  </span>
-                </div>
-                <div className="w-full bg-slate-700 rounded-full h-2">
-                  <div 
-                    className="h-2 rounded-full bg-purple-500" 
-                    style={{ 
-                      width: `${Math.max(0, 100 - (errorCount * 5))}%` 
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {activeTab === 'storage' && (
-        <div className="space-y-6">
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">File Storage Analysis</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-blue-900/20 rounded-lg p-4">
-                <div className="text-blue-400 text-sm font-medium mb-2">Total X-rays</div>
-                <div className="text-2xl font-bold">{panoCount}</div>
-                <div className="mt-2 text-xs text-blue-300/70">
-                  X-rays stored in the system
-                </div>
-              </div>
-              
-              <div className="bg-teal-900/20 rounded-lg p-4">
-                <div className="text-teal-400 text-sm font-medium mb-2">Average File Size</div>
-                <div className="text-2xl font-bold">
-                  {performanceMetrics.avgFileSize.toFixed(1)} MB
-                </div>
-                <div className="mt-2 text-xs text-teal-300/70">
-                  Average DICOM image size
-                </div>
-              </div>
-              
-              <div className="bg-amber-900/20 rounded-lg p-4">
-                <div className="text-amber-400 text-sm font-medium mb-2">Estimated Total Storage</div>
-                <div className="text-2xl font-bold">
-                  {((panoCount * performanceMetrics.avgFileSize) / 1024).toFixed(2)} GB
-                </div>
-                <div className="mt-2 text-xs text-amber-300/70">
-                  Based on average file size
-                </div>
-              </div>
-            </div>
-          </div>
-          
-          {/* Storage Paths */}
-          {xrayConfig && (
-            <div className="bg-slate-700/50 rounded-lg p-4">
-              <h3 className="text-lg font-medium mb-3">Storage Paths</h3>
-              
-              <div className="space-y-3">
-                {/* PM Bridge Path */}
-                <div className="bg-slate-800 rounded-lg p-3">
-                  <h4 className="text-blue-400 font-medium mb-2">PM Bridge Path</h4>
-                  <div className="bg-slate-700/30 p-2 rounded text-sm font-mono overflow-x-auto">
-                    {xrayConfig.pmBridgePath}
+                  <div className="text-2xl font-bold">{systemMetrics.xrayCount}</div>
+                  <div className={`text-xs ${darkMode ? 'text-blue-300/70' : 'text-blue-500'} mt-1`}>
+                    Valid Panoramic X-rays
                   </div>
                 </div>
                 
-                {/* Images Path */}
-                <div className="bg-slate-800 rounded-lg p-3">
-                  <h4 className="text-blue-400 font-medium mb-2">Images Path</h4>
-                  <div className="bg-slate-700/30 p-2 rounded text-sm font-mono overflow-x-auto">
-                    {xrayConfig.romexisRadioPath}
+                <div className={`${darkMode ? 'bg-purple-900/20' : 'bg-purple-50 border border-purple-100'} rounded-lg p-4`}>
+                  <div className={`flex items-center gap-2 ${darkMode ? 'text-purple-400' : 'text-purple-700'} mb-2`}>
+                    <Users className="w-4 h-4" />
+                    <span className="text-sm font-medium">Active Patients</span>
+                  </div>
+                  <div className="text-2xl font-bold">{systemMetrics.patientCount}</div>
+                  <div className={`text-xs ${darkMode ? 'text-purple-300/70' : 'text-purple-500'} mt-1`}>
+                    Unique patients
                   </div>
                 </div>
                 
-                {/* Storage Recommendation */}
-                <div className="bg-slate-800 rounded-lg p-3">
-                  <h4 className="text-yellow-400 font-medium mb-2 flex items-center">
-                    <AlertTriangle className="w-4 h-4 mr-2" />
-                    Storage Recommendation
-                  </h4>
-                  <p className="text-sm">
-                    Based on your current usage patterns, you should ensure at least 
-                    {' '}{((panoCount * performanceMetrics.avgFileSize * 2) / 1024).toFixed(2)} GB 
-                    of free space to accommodate future X-rays.
-                  </p>
+                <div className={`${darkMode ? 'bg-green-900/20' : 'bg-green-50 border border-green-100'} rounded-lg p-4`}>
+                  <div className={`flex items-center gap-2 ${darkMode ? 'text-green-400' : 'text-green-700'} mb-2`}>
+                    <CheckCircle className="w-4 h-4" />
+                    <span className="text-sm font-medium">Success Rate</span>
+                  </div>
+                  <div className="text-2xl font-bold">{systemMetrics.successRate.toFixed(1)}%</div>
+                  <div className={`text-xs ${darkMode ? 'text-green-300/70' : 'text-green-500'} mt-1`}>
+                    X-ray processing rate
+                  </div>
+                </div>
+                
+                <div className={`${darkMode ? 'bg-amber-900/20' : 'bg-amber-50 border border-amber-100'} rounded-lg p-4`}>
+                  <div className={`flex items-center gap-2 ${darkMode ? 'text-amber-400' : 'text-amber-700'} mb-2`}>
+                    <Clock className="w-4 h-4" />
+                    <span className="text-sm font-medium">Processing Time</span>
+                  </div>
+                  <div className="text-2xl font-bold">
+                    {systemMetrics.avgProcessingTime.toFixed(1)}s
+                  </div>
+                  <div className={`text-xs ${darkMode ? 'text-amber-300/70' : 'text-amber-500'} mt-1`}>
+                    Average per X-ray
+                  </div>
+                </div>
+              </div>
+              
+              {/* System Info Overview */}
+              <div className={`${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4 mb-4`}>
+                <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3 flex items-center`}>
+                  <Server className="w-4 h-4 mr-2" />
+                  System Information
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className={`${darkMode ? 'bg-slate-800' : 'bg-white border border-gray-200'} rounded-lg p-3`}>
+                    <h4 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-2 text-sm`}>Software</h4>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Name:</span>
+                        <span className={`${darkMode ? 'text-white' : 'text-gray-900'} font-medium text-sm`}>
+                          {xrayConfig?.name || 'Unknown'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Version:</span>
+                        <span className={`${darkMode ? 'text-white' : 'text-gray-900'} font-medium text-sm`}>
+                          {xrayConfig?.version || 'Unknown'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Status:</span>
+                        <span className={`font-medium text-sm ${
+                          systemStatus === 'online' ? darkMode ? 'text-green-400' : 'text-green-600' :
+                          systemStatus === 'warning' ? darkMode ? 'text-yellow-400' : 'text-yellow-600' :
+                          darkMode ? 'text-red-400' : 'text-red-600'
+                        }`}>
+                          {systemStatus === 'online' ? 'Operational' : 
+                           systemStatus === 'warning' ? 'Degraded' : 'Error'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className={`${darkMode ? 'bg-slate-800' : 'bg-white border border-gray-200'} rounded-lg p-3`}>
+                    <h4 className={`${darkMode ? 'text-purple-400' : 'text-purple-700'} font-medium mb-2 text-sm`}>Database</h4>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Server:</span>
+                        <span className={`${darkMode ? 'text-white' : 'text-gray-900'} font-medium text-sm`}>
+                          {xrayConfig?.dbConfig?.server || 'Unknown'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Database:</span>
+                        <span className={`${darkMode ? 'text-white' : 'text-gray-900'} font-medium text-sm`}>
+                          {xrayConfig?.dbConfig?.database || 'Unknown'}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>SSL:</span>
+                        <span className={`${darkMode ? 'text-white' : 'text-gray-900'} font-medium text-sm`}>
+                          {xrayConfig?.dbConfig?.ssl ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className={`${darkMode ? 'bg-slate-800' : 'bg-white border border-gray-200'} rounded-lg p-3`}>
+                    <h4 className={`${darkMode ? 'text-amber-400' : 'text-amber-700'} font-medium mb-2 text-sm`}>Activity</h4>
+                    <div className="space-y-1">
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Errors:</span>
+                        <span className={`${darkMode ? 'text-red-400' : 'text-red-600'} font-medium text-sm`}>
+                          {systemMetrics.errorCount}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Warnings:</span>
+                        <span className={`${darkMode ? 'text-yellow-400' : 'text-yellow-600'} font-medium text-sm`}>
+                          {systemMetrics.warningCount}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className={`${darkMode ? 'text-slate-400' : 'text-gray-500'} text-sm`}>Last X-ray:</span>
+                        <span className={`${darkMode ? 'text-blue-400' : 'text-blue-600'} font-medium text-sm`}>
+                          {treatments.length > 0 
+                            ? new Date(treatments[0].timestamp).toLocaleTimeString()
+                            : 'N/A'
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Hourly Distribution */}
+              <div className={`${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4`}>
+                <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3`}>
+                  Hourly Activity Distribution
+                </h3>
+                
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart 
+                      data={getActivityData}
+                      margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#444" : "#eee"} />
+                      <XAxis 
+                        dataKey="hour" 
+                        stroke={darkMode ? "#999" : "#666"}
+                      />
+                      <YAxis 
+                        stroke={darkMode ? "#999" : "#666"}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? '#1e293b' : '#fff', 
+                          border: darkMode ? '1px solid #334155' : '1px solid #ddd',
+                          borderRadius: '0.375rem'
+                        }}
+                      />
+                      <Legend />
+                      <Bar 
+                        dataKey="xrays" 
+                        name="X-rays Taken" 
+                        fill="#3b82f6" 
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
               </div>
             </div>
           )}
-          
-          {/* File Size Distribution */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">File Size Distribution</h3>
-            
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart 
-                  data={[
-                    { size: '< 5 MB', count: 2 },
-                    { size: '5-7 MB', count: 5 },
-                    { size: '7-8 MB', count: 8 },
-                    { size: '8-10 MB', count: 3 },
-                    { size: '> 10 MB', count: 0 }
-                  ]}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                  <XAxis dataKey="size" stroke="#999" />
-                  <YAxis stroke="#999" />
-                  <Tooltip formatter={(value) => [value, 'Files']} />
-                  <Bar dataKey="count" name="Files" fill="#36A2EB" />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
         </div>
-      )}
-      
-      {activeTab === 'network' && (
-        <div className="space-y-6">
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">Network Status</h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium mb-2">Connection Status</h4>
+        
+        {/* System Health Section */}
+        <div className={`mb-6 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'} rounded-xl border`}>
+          <div 
+            className="p-4 flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection('health')}
+          >
+            <h2 className="text-lg font-semibold flex items-center">
+              <Heart className="w-5 h-5 mr-2 text-pink-500" />
+              System Health
+            </h2>
+            {expandedSections.health ? (
+              <ChevronUp className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            ) : (
+              <ChevronDown className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            )}
+          </div>
+          
+          {expandedSections.health && (
+            <div className={`p-4 pt-0 border-t ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+              {/* Health Score Radar Chart */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div className={`col-span-1 ${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4`}>
+                  <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3`}>Health Scores</h3>
+                  
+                  <div className="space-y-3">
+                    {healthScores.map((category) => (
+                      <div key={category.category}>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-sm">{category.category}</span>
+                          <span className={`text-sm ${
+                            category.score >= 90 ? darkMode ? 'text-green-400' : 'text-green-600' :
+                            category.score >= 70 ? darkMode ? 'text-blue-400' : 'text-blue-600' :
+                            category.score >= 50 ? darkMode ? 'text-yellow-400' : 'text-yellow-600' :
+                            darkMode ? 'text-red-400' : 'text-red-600'
+                          }`}>
+                            {category.score >= 90 ? 'Excellent' :
+                             category.score >= 70 ? 'Good' :
+                             category.score >= 50 ? 'Fair' : 'Poor'}
+                          </span>
+                        </div>
+                        <div className={`w-full ${darkMode ? 'bg-slate-600' : 'bg-gray-300'} rounded-full h-2.5`}>
+                          <div 
+                            className={`h-2.5 rounded-full ${
+                              category.score >= 90 ? 'bg-green-500' :
+                              category.score >= 70 ? 'bg-blue-500' :
+                              category.score >= 50 ? 'bg-yellow-500' :
+                              'bg-red-500'
+                            }`}
+                            style={{ width: `${category.score}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
                 
-                <div className="space-y-3">
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-green-500 mr-2" />
-                    <span>Database Connection: Online</span>
-                  </div>
+                <div className={`col-span-2 ${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4`}>
+                  <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3`}>Health Radar</h3>
                   
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-green-500 mr-2" />
-                    <span>DICOM Server Connection: Online</span>
-                  </div>
-                  
-                  <div className="flex items-center">
-                    <div className="w-3 h-3 rounded-full bg-green-500 mr-2" />
-                    <span>Cloud Storage Connection: Online</span>
+                  <div className="h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart outerRadius={90} data={healthScores}>
+                        <PolarGrid stroke={darkMode ? "#444" : "#ccc"} />
+                        <PolarAngleAxis 
+                          dataKey="category" 
+                          tick={{ fill: darkMode ? '#fff' : '#333' }}
+                        />
+                        <PolarRadiusAxis 
+                          angle={30} 
+                          domain={[0, 100]} 
+                          tick={{ fill: darkMode ? '#aaa' : '#666' }}
+                        />
+                        <Radar 
+                          name="Health Score" 
+                          dataKey="score" 
+                          stroke="#3b82f6" 
+                          fill="#3b82f6" 
+                          fillOpacity={0.6} 
+                        />
+                        <Tooltip 
+                          formatter={(value) => [`${value}%`, 'Health Score']}
+                          contentStyle={{ 
+                            backgroundColor: darkMode ? '#1e293b' : '#fff', 
+                            border: darkMode ? '1px solid #334155' : '1px solid #ddd'
+                          }}
+                        />
+                      </RadarChart>
+                    </ResponsiveContainer>
                   </div>
                 </div>
               </div>
               
-              <div className="bg-slate-800 rounded-lg p-3">
-                <h4 className="text-blue-400 font-medium mb-2">Connection Metrics</h4>
+              {/* Error Time Distribution */}
+              <div className={`${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4`}>
+                <h3 className={`${darkMode ? 'text-red-400' : 'text-red-700'} font-medium mb-3`}>Error Time Distribution</h3>
                 
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Avg. Response Time:</span>
-                    <span className="font-medium">120ms</span>
+                <div className="h-64">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart
+                      data={getErrorDistribution}
+                      margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#444" : "#eee"} />
+                      <XAxis 
+                        dataKey="hour" 
+                        stroke={darkMode ? "#999" : "#666"}
+                      />
+                      <YAxis 
+                        stroke={darkMode ? "#999" : "#666"}
+                      />
+                      <Tooltip 
+                        contentStyle={{ 
+                          backgroundColor: darkMode ? '#1e293b' : '#fff', 
+                          border: darkMode ? '1px solid #334155' : '1px solid #ddd',
+                          borderRadius: '0.375rem'
+                        }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="errors" 
+                        stroke="#ef4444" 
+                        fill="#ef4444" 
+                        fillOpacity={0.2}
+                        activeDot={{ r: 6 }}
+                        name="Error Count"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* Activity Timeline Section */}
+        <div className={`mb-6 ${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'} rounded-xl border`}>
+          <div 
+            className="p-4 flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection('activity')}
+          >
+            <h2 className="text-lg font-semibold flex items-center">
+              <Radio className="w-5 h-5 mr-2 text-green-500" />
+              X-ray Activity Timeline
+            </h2>
+            {expandedSections.activity ? (
+              <ChevronUp className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            ) : (
+              <ChevronDown className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            )}
+          </div>
+          
+          {expandedSections.activity && (
+            <div className={`p-4 pt-0 border-t ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+              {/* Recent Activity List */}
+              <div className={`${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4 mb-4`}>
+                <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3`}>
+                  Recent X-ray Activity
+                </h3>
+                
+                {treatments.length > 0 ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className={`text-left ${darkMode ? 'border-b border-slate-600' : 'border-b border-gray-300'}`}>
+                          <th className={`pb-2 ${darkMode ? 'text-slate-400' : 'text-gray-500'} font-medium`}>Timestamp</th>
+                          <th className={`pb-2 ${darkMode ? 'text-slate-400' : 'text-gray-500'} font-medium`}>Patient</th>
+                          <th className={`pb-2 ${darkMode ? 'text-slate-400' : 'text-gray-500'} font-medium`}>Type</th>
+                          <th className={`pb-2 ${darkMode ? 'text-slate-400' : 'text-gray-500'} font-medium`}>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {treatments.slice(0, 10).map((treatment, index) => (
+                          <tr key={index} className={darkMode ? 'border-b border-slate-700 hover:bg-slate-700/30' : 'border-b border-gray-200 hover:bg-gray-50'}>
+                            <td className="py-2">{formatTimestamp(treatment.timestamp)}</td>
+                            <td className="py-2">{treatment.patientName}</td>
+                            <td className="py-2">
+                              <span className={`px-2 py-0.5 ${darkMode ? 'bg-blue-900/30 text-blue-400' : 'bg-blue-100 text-blue-800'} rounded-full text-xs`}>
+                                {treatment.type}
+                              </span>
+                            </td>
+                            <td className="py-2">
+                              <span className={`px-2 py-0.5 rounded-full text-xs ${
+                                treatment.success 
+                                  ? darkMode ? 'bg-green-900/30 text-green-400' : 'bg-green-100 text-green-800'
+                                  : darkMode ? 'bg-red-900/30 text-red-400' : 'bg-red-100 text-red-800'
+                              }`}>
+                                {treatment.success ? 'Success' : 'Failed'}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className={`text-center py-4 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                    No treatments found
+                  </div>
+                )}
+              </div>
+              
+              {/* Activity Patterns */}
+              <div className={`${darkMode ? 'bg-slate-700/50' : 'bg-gray-50 border border-gray-200'} rounded-lg p-4`}>
+                <h3 className={`${darkMode ? 'text-blue-400' : 'text-blue-700'} font-medium mb-3`}>
+                  Patient Activity Pattern
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <h4 className={`text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-gray-700'}`}>
+                      Hourly Distribution
+                    </h4>
+                    <div className="h-52">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart 
+                          data={getActivityData}
+                          margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? "#444" : "#eee"} />
+                          <XAxis dataKey="hour" stroke={darkMode ? "#999" : "#666"} />
+                          <YAxis stroke={darkMode ? "#999" : "#666"} />
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: darkMode ? '#1e293b' : '#fff', 
+                              border: darkMode ? '1px solid #334155' : '1px solid #ddd',
+                              borderRadius: '0.375rem'
+                            }}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="xrays" 
+                            name="X-rays" 
+                            stroke="#3b82f6" 
+                            strokeWidth={2}
+                            dot={{ r: 3 }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                   
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Upload Bandwidth:</span>
-                    <span className="font-medium">15 MB/s</span>
-                  </div>
-                  
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Network Errors:</span>
-                    <span className="font-medium">{logs.filter(log => log.message.toLowerCase().includes('network') && log.severity === 'error').length}</span>
+                  <div>
+                    <h4 className={`text-sm font-medium mb-2 ${darkMode ? 'text-slate-300' : 'text-gray-700'}`}>
+                      Status Distribution
+                    </h4>
+                    <div className="h-52">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={[
+                              { name: 'Success', value: treatments.filter(t => t.success).length },
+                              { name: 'Failed', value: treatments.filter(t => !t.success).length }
+                            ]}
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={40}
+                            outerRadius={80}
+                            paddingAngle={5}
+                            dataKey="value"
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            labelLine={false}
+                          >
+                            <Cell fill="#10b981" />
+                            <Cell fill="#ef4444" />
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ 
+                              backgroundColor: darkMode ? '#1e293b' : '#fff', 
+                              border: darkMode ? '1px solid #334155' : '1px solid #ddd',
+                              borderRadius: '0.375rem'
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
+          )}
+        </div>
+        
+        {/* Active Alerts Section */}
+        <div className={`${darkMode ? 'bg-slate-800 border-slate-700' : 'bg-white border-gray-300'} rounded-xl border`}>
+          <div 
+            className="p-4 flex justify-between items-center cursor-pointer"
+            onClick={() => toggleSection('alerts')}
+          >
+            <h2 className="text-lg font-semibold flex items-center">
+              <Bell className="w-5 h-5 mr-2 text-amber-500" />
+              Active Alerts
+              <span className={`ml-2 w-5 h-5 flex items-center justify-center rounded-full text-xs ${
+                alerts.length > 0 
+                  ? darkMode ? 'bg-red-500/20 text-red-400' : 'bg-red-100 text-red-600'
+                  : darkMode ? 'bg-green-500/20 text-green-400' : 'bg-green-100 text-green-600'
+              }`}>
+                {alerts.length}
+              </span>
+            </h2>
+            {expandedSections.alerts ? (
+              <ChevronUp className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            ) : (
+              <ChevronDown className={`w-5 h-5 ${darkMode ? 'text-slate-400' : 'text-gray-500'}`} />
+            )}
           </div>
           
-          {/* Network Activity Chart */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">Network Activity</h3>
-            
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart
-                  data={dailyStats.map(item => ({
-                    date: item.date,
-                    uploads: item.panos,
-                    downloads: Math.floor(item.panos * 0.7)
-                  }))}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#444" />
-                  <XAxis 
-                    dataKey="date" 
-                    stroke="#999"
-                    tickFormatter={(value) => {
-                      const parts = value.split('-');
-                      return `${parts[1]}/${parts[2]}`;
-                    }}
-                  />
-                  <YAxis stroke="#999" />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: '#1e293b', 
-                      border: '1px solid #334155',
-                      borderRadius: '0.375rem'
-                    }}
-                  />
-                  <Legend />
-                  <Area 
-                    type="monotone" 
-                    dataKey="uploads" 
-                    name="Uploads" 
-                    stroke="#8884d8" 
-                    fill="#8884d8"
-                    fillOpacity={0.3} 
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey="downloads" 
-                    name="Downloads" 
-                    stroke="#82ca9d" 
-                    fill="#82ca9d"
-                    fillOpacity={0.3}
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+          {expandedSections.alerts && (
+            <div className={`p-4 pt-0 border-t ${darkMode ? 'border-slate-700' : 'border-gray-200'}`}>
+              {alerts.length > 0 ? (
+                <div className="space-y-3">
+                  {alerts.map((alert) => (
+                    <div 
+                      key={alert.id} 
+                      className={`p-3 rounded-lg ${
+                        alert.severity === 'error' 
+                          ? darkMode ? 'bg-red-900/20 border border-red-600/30' : 'bg-red-50 border border-red-200'
+                          : darkMode ? 'bg-amber-900/20 border border-amber-600/30' : 'bg-amber-50 border border-amber-200'
+                      }`}
+                    >
+                      <div className="flex items-start">
+                        <div className="mr-3 mt-1">
+                          {alert.severity === 'error' ? (
+                            <AlertCircle className={`w-5 h-5 ${darkMode ? 'text-red-500' : 'text-red-600'}`} />
+                          ) : (
+                            <AlertTriangle className={`w-5 h-5 ${darkMode ? 'text-amber-500' : 'text-amber-600'}`} />
+                          )}
+                        </div>
+                        <div className="flex-grow">
+                          <div className="flex justify-between items-center mb-1">
+                            <span className={`text-xs ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+                              {formatTimestamp(alert.timestamp)}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              alert.severity === 'error' 
+                                ? darkMode ? 'bg-red-900/40 text-red-400' : 'bg-red-100 text-red-700'
+                                : darkMode ? 'bg-amber-900/40 text-amber-400' : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {alert.severity.toUpperCase()}
+                            </span>
+                          </div>
+                          <div className="text-sm">
+                            {alert.message}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className={`${darkMode ? 'bg-green-900/20' : 'bg-green-50'} p-4 rounded-lg border ${darkMode ? 'border-green-700/30' : 'border-green-200'} text-center`}>
+                  <CheckCircle className={`w-10 h-10 mx-auto mb-2 ${darkMode ? 'text-green-500' : 'text-green-600'}`} />
+                  <p className={`font-medium ${darkMode ? 'text-green-400' : 'text-green-800'}`}>
+                    No active alerts
+                  </p>
+                  <p className={`text-sm mt-1 ${darkMode ? 'text-green-500/70' : 'text-green-600'}`}>
+                    All systems operating normally
+                  </p>
+                </div>
+              )}
             </div>
-          </div>
-          
-          {/* API Endpoints */}
-          <div className="bg-slate-700/50 rounded-lg p-4">
-            <h3 className="text-lg font-medium mb-3">API Endpoints</h3>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="text-left border-b border-slate-600">
-                    <th className="pb-2 text-slate-400 font-medium">Endpoint</th>
-                    <th className="pb-2 text-slate-400 font-medium">Status</th>
-                    <th className="pb-2 text-slate-400 font-medium">Response Time</th>
-                    <th className="pb-2 text-slate-400 font-medium">Last Call</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="border-b border-slate-700 hover:bg-slate-700/30">
-                    <td className="py-2">/api/uploadFile</td>
-                    <td className="py-2">
-                      <span className="px-2 py-0.5 bg-green-900/30 text-green-400 rounded-full text-xs">
-                        Online
-                      </span>
-                    </td>
-                    <td className="py-2">238ms</td>
-                    <td className="py-2">{logs.find(log => log.message.includes('uploaded file'))?.timestamp ? formatTimestamp(logs.find(log => log.message.includes('uploaded file'))!.timestamp) : 'N/A'}</td>
-                  </tr>
-                  <tr className="border-b border-slate-700 hover:bg-slate-700/30">
-                    <td className="py-2">/api/createTreatment</td>
-                    <td className="py-2">
-                      <span className="px-2 py-0.5 bg-green-900/30 text-green-400 rounded-full text-xs">
-                        Online
-                      </span>
-                    </td>
-                    <td className="py-2">157ms</td>
-                    <td className="py-2">{logs.find(log => log.message.includes('Treatment created successfully'))?.timestamp ? formatTimestamp(logs.find(log => log.message.includes('Treatment created successfully'))!.timestamp) : 'N/A'}</td>
-                  </tr>
-                  <tr className="border-b border-slate-700 hover:bg-slate-700/30">
-                    <td className="py-2">/api/auth</td>
-                    <td className="py-2">
-                      <span className="px-2 py-0.5 bg-green-900/30 text-green-400 rounded-full text-xs">
-                        Online
-                      </span>
-                    </td>
-                    <td className="py-2">82ms</td>
-                    <td className="py-2">{logs.find(log => log.message.includes('Token refreshed'))?.timestamp ? formatTimestamp(logs.find(log => log.message.includes('Token refreshed'))!.timestamp) : 'N/A'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
+          )}
         </div>
-      )}
-      
-      {/* Status message for snapshot */}
-      {snapshotStatus && (
-        <div className={`mt-6 px-4 py-2 rounded-lg ${
-          snapshotStatus.includes('Error') 
-            ? 'bg-red-900/30 border border-red-700' 
-            : 'bg-blue-900/30 border border-blue-700'
-        }`}>
-          {snapshotStatus}
+        
+        {/* Footer with auto-refresh indicator */}
+        <div className="mt-6 text-center">
+          <p className={`text-sm ${darkMode ? 'text-slate-400' : 'text-gray-500'}`}>
+            System monitoring {refreshInterval 
+              ? `- Auto-refreshing every ${refreshInterval} seconds` 
+              : '- Manual refresh mode'}
+          </p>
+          <p className={`text-xs mt-1 ${darkMode ? 'text-slate-500' : 'text-gray-400'}`}>
+            Last updated: {lastUpdated.toLocaleString()}
+          </p>
         </div>
-      )}
+      </div>
     </div>
   );
 };
 
-export default DentalXrayDashboard;
+// Add this CSS to your global CSS or inline styles
+const globalStyles = `
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-100%) }
+  50% { transform: translateX(0%) }
+  100% { transform: translateX(100%) }
+}
+
+.animate-progress-indeterminate {
+  animation: progress-indeterminate 2s ease-in-out infinite;
+}
+`;
+
+export default DentalXrayMonitoring;
