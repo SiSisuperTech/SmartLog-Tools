@@ -6,11 +6,15 @@
   "scripts": {
     "dev:frontend": "vite",
     "dev:backend": "node server.js",
-    "dev": "node --no-deprecation ./node_modules/concurrently/dist/bin/concurrently.js \"npm run dev:frontend\" \"npm run dev:backend\""
+    "dev": "node --no-deprecation ./node_modules/concurrently/dist/bin/concurrently.js \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "start": "node start.js"
   },
   "dependencies": {
-    "@aws-sdk/client-cloudwatch-logs": "^3.525.0",
-    "@aws-sdk/client-sts": "^3.525.0",
+    "@aws-sdk/client-cloudwatch-logs": "^3.775.0",
+    "@aws-sdk/client-dynamodb": "^3.775.0",
+    "@aws-sdk/client-s3": "^3.775.0",
+    "@aws-sdk/client-sts": "^3.775.0",
+    "@aws-sdk/credential-providers": "^3.775.0",
     "child_process": "^1.0.2",
     "cors": "^2.8.5",
     "csv-parse": "^5.6.0",

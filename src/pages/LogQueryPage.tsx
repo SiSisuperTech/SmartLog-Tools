@@ -14,7 +14,7 @@ import {
   Plus
 } from 'lucide-react';
 import { useAwsAuth } from '../hooks/useAwsAuth';
-import locationData from 'C:/Users/SISI/Documents/SmartLog-Tools/data.json';
+import locationData from '../data.json';
 
 type Location = {
   ID: number;
@@ -210,53 +210,16 @@ const LogQueryPage: React.FC = () => {
       }
       
       const data = await response.json();
-      console.log('Raw API response:', typeof data, Object.keys(data));
-      
-      if (data.error) {
-        throw new Error(`Server error: ${data.error}`);
-      }
+      console.log('Raw API response:', typeof data, Array.isArray(data) ? data.length : Object.keys(data));
       
       try {
-        // Check if data is in CloudWatch format (results is array of field arrays)
-        if (data.results && Array.isArray(data.results) && 
-            data.results.length > 0 && Array.isArray(data.results[0])) {
+        // The API now returns an array of log objects directly
+        if (Array.isArray(data)) {
+          console.log(`Processing ${data.length} logs received directly from API`);
           
-          console.log('Converting CloudWatch format logs...');
-          
-          // Convert CloudWatch format to standard format
-          const processedLogs = data.results.map((logEntry: CloudWatchLogField[]) => {
-            let timestamp = '';
-            let message = '';
-            let logStream = 'unknown';
-            
-            // Process each field in the CloudWatch log format
-            logEntry.forEach((field: CloudWatchLogField) => {
-              if (field.field === '@timestamp') {
-                timestamp = field.value;
-              } 
-              else if (field.field === '@message') {
-                message = field.value || 'No content available';
-              }
-              else if (field.field === '@logStream') {
-                logStream = field.value;
-              }
-            });
-            
-            // Determine severity based on content
-            let severity: 'info' | 'warning' | 'error' = 'info';
-            const lowerMsg = message.toLowerCase();
-            if (lowerMsg.includes('error')) {
-              severity = 'error';
-            } else if (lowerMsg.includes('warn')) {
-              severity = 'warning';
-            }
-            
-            return { timestamp, message, logStream, severity };
-          });
-          
-          // Store the transformed logs
-          if (processedLogs.length > 1000) {
-            console.log(`Storing ${processedLogs.length} logs in chunks`);
+          // Store the logs
+          if (data.length > 1000) {
+            console.log(`Storing ${data.length} logs in chunks`);
             
             // Clear previous storage
             const keys = Object.keys(sessionStorage).filter(key => 
@@ -265,27 +228,29 @@ const LogQueryPage: React.FC = () => {
             
             // Set metadata
             sessionStorage.setItem('logSource', 'aws');
-            sessionStorage.setItem('logCount', String(processedLogs.length));
+            sessionStorage.setItem('logCount', String(data.length));
             
             // Store logs in chunks
             const MAX_CHUNK_SIZE = 1000;
-            const chunks = Math.ceil(processedLogs.length / MAX_CHUNK_SIZE);
+            const chunks = Math.ceil(data.length / MAX_CHUNK_SIZE);
             for (let i = 0; i < chunks; i++) {
               const start = i * MAX_CHUNK_SIZE;
-              const end = Math.min(start + MAX_CHUNK_SIZE, processedLogs.length);
-              const chunk = processedLogs.slice(start, end);
+              const end = Math.min(start + MAX_CHUNK_SIZE, data.length);
+              const chunk = data.slice(start, end);
               sessionStorage.setItem(`awsLogs_chunk_${i}`, JSON.stringify(chunk));
             }
             
             sessionStorage.setItem('awsLogs_chunks', String(chunks));
           } else {
             // Store as a single unit for smaller datasets
-            sessionStorage.setItem('awsLogs', JSON.stringify({ results: processedLogs }));
+            sessionStorage.setItem('awsLogs', JSON.stringify(data));
             sessionStorage.setItem('logSource', 'aws');
           }
-        } else {
-          // Standard format - store directly
-          const logData = data.results || [];
+        }
+        // Legacy format handling (results field)
+        else if (data.results) {
+          const logData = data.results;
+          console.log(`Processing ${logData.length} logs from results field`);
           
           if (logData.length > 1000) {
             console.log(`Storing ${logData.length} logs in chunks`);
@@ -311,10 +276,12 @@ const LogQueryPage: React.FC = () => {
             
             sessionStorage.setItem('awsLogs_chunks', String(chunks));
           } else {
-            // Store as a single unit for smaller datasets
             sessionStorage.setItem('awsLogs', JSON.stringify({ results: logData }));
             sessionStorage.setItem('logSource', 'aws');
           }
+        }
+        else {
+          throw new Error('Unknown log data format received from server');
         }
         
         // Save query params for future reference
@@ -327,7 +294,7 @@ const LogQueryPage: React.FC = () => {
         console.error('Error storing logs:', storageError);
         alert('Failed to store logs. The dataset may be too large.');
       }
-    } catch (error: unknown) {
+    } catch (error) {
       console.error('Log query failed:', error);
       
       let errorMessage = 'Failed to query logs';

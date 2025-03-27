@@ -1,7 +1,16 @@
 import { ClinicMonitoringConfig } from '../types/clinic-types';
 
-// API base URL
-const API_BASE_URL = 'http://localhost:3005/api';
+// API base URL determination based on environment
+const getApiBaseUrl = () => {
+  // In production or when not explicitly in development, use relative URLs
+  if (process.env.NODE_ENV === 'production') {
+    return '/api';
+  }
+  // In development, try to use the localhost URL
+  return 'http://localhost:3005/api';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Fetch all clinics
 export const fetchClinics = async (): Promise<ClinicMonitoringConfig[]> => {

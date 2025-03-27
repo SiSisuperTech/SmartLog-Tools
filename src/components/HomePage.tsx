@@ -177,8 +177,8 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       )}
 
-      {/* Display monitored clinics if available */}
-      {monitoredClinics.length > 0 && (
+      {/* Display monitored clinics if available AND authenticated */}
+      {isAuthenticated && monitoredClinics.length > 0 && (
         <div className="p-6 max-w-4xl mx-auto w-full">
           <h2 className="text-xl font-semibold text-white mb-4 flex items-center">
             <Monitor className="w-5 h-5 mr-2 text-blue-400" />

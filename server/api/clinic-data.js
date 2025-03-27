@@ -125,4 +125,17 @@ export const deleteAllClinics = () => {
   } else {
     return { success: false, error: 'Failed to reset clinic data' };
   }
+};
+
+// Get available clinics for monitoring
+export const getAvailableClinics = () => {
+  // This would typically fetch from a database or external API
+  // For demonstration, we'll return a static list of sample clinics
+  return [
+    { id: "2261", name: "Dental Clinic Alpha" },
+    { id: "2262", name: "Dental Clinic Beta" },
+    { id: "2263", name: "Dental Clinic Gamma" },
+    { id: "2264", name: "Dental Clinic Delta" },
+    { id: "2265", name: "Dental Clinic Epsilon" }
+  ];
 }; 

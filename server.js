@@ -8,8 +8,88 @@ import {
   addClinic, 
   updateClinic, 
   deleteClinic, 
-  deleteAllClinics 
+  deleteAllClinics,
+  getAvailableClinics
 } from './server/api/clinic-data.js';
+import net from 'net';
+import fs from 'fs';
+import path from 'path';
+
+// Function to check if a port is in use
+const isPortInUse = (port) => {
+  return new Promise((resolve) => {
+    const server = net.createServer()
+      .once('error', () => resolve(true))
+      .once('listening', () => {
+        server.close();
+        resolve(false);
+      })
+      .listen(port);
+  });
+};
+
+// Function to find an available port
+const findAvailablePort = async (startPort, maxAttempts = 10) => {
+  let port = startPort;
+  let attempts = 0;
+  
+  while (attempts < maxAttempts) {
+    const inUse = await isPortInUse(port);
+    if (!inUse) {
+      return port;
+    }
+    port++;
+    attempts++;
+  }
+  
+  throw new Error(`Could not find an available port after ${maxAttempts} attempts`);
+};
+
+// Store server process info
+const saveServerInfo = (port) => {
+  const serverInfo = {
+    pid: process.pid,
+    port: port,
+    startTime: new Date().toISOString()
+  };
+  
+  try {
+    fs.writeFileSync(
+      path.join(process.cwd(), '.server-info.json'),
+      JSON.stringify(serverInfo, null, 2)
+    );
+    console.log(`Server info saved: PID ${process.pid}, port ${port}`);
+  } catch (error) {
+    console.error('Failed to save server info:', error);
+  }
+};
+
+// Try to kill any existing server process
+const killExistingServer = () => {
+  try {
+    if (fs.existsSync(path.join(process.cwd(), '.server-info.json'))) {
+      const serverInfo = JSON.parse(
+        fs.readFileSync(path.join(process.cwd(), '.server-info.json'), 'utf8')
+      );
+      
+      if (serverInfo.pid) {
+        try {
+          // On Windows, we can't directly kill using Node.js
+          if (process.platform === 'win32') {
+            require('child_process').execSync(`taskkill /pid ${serverInfo.pid} /f`);
+          } else {
+            process.kill(serverInfo.pid, 'SIGTERM');
+          }
+          console.log(`Killed existing server process (PID: ${serverInfo.pid})`);
+        } catch (killError) {
+          console.log(`No process found with PID: ${serverInfo.pid} or it's already terminated`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error handling existing server:', error);
+  }
+};
 
 // Explicitly import node-fetch using a dynamic import with await
 let fetch;
@@ -19,8 +99,11 @@ let fetch;
   console.log('node-fetch loaded successfully');
 })();
 
+// Try to kill any existing server before starting
+killExistingServer();
+
 const app = express();
-const PORT = 3005; // Fixed port
+const DEFAULT_PORT = 3005;
 
 app.use(cors());
 app.use(express.json());
@@ -33,6 +116,24 @@ app.get('/api/aws-status', async (req, res) => {
   } catch (error) {
     console.error('Error checking AWS status:', error);
     res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Add the missing check-aws-auth endpoint
+app.get('/api/check-aws-auth', async (req, res) => {
+  try {
+    const status = await checkAwsAuth();
+    res.json({ 
+      authenticated: status.isAuthenticated,
+      identity: status.identity,
+      error: status.error
+    });
+  } catch (error) {
+    console.error('Error checking AWS authentication:', error);
+    res.status(500).json({ 
+      authenticated: false, 
+      error: 'Internal server error' 
+    });
   }
 });
 
@@ -95,6 +196,17 @@ app.get('/api/clinics', (req, res) => {
     res.json({ success: true, clinics });
   } catch (error) {
     console.error('Error fetching clinics:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET - Get available clinics for monitoring
+app.get('/api/clinics/available', (req, res) => {
+  try {
+    const availableClinics = getAvailableClinics();
+    res.json(availableClinics);
+  } catch (error) {
+    console.error('Error fetching available clinics:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -192,6 +304,41 @@ app.use((err, req, res, next) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+// Start the server with intelligent port handling
+const startServer = async () => {
+  try {
+    const port = await findAvailablePort(DEFAULT_PORT);
+    
+    const server = app.listen(port, () => {
+      console.log(`Server running on port ${port}${port !== DEFAULT_PORT ? ' (default port was in use)' : ''}`);
+      
+      // Save server info for future reference
+      saveServerInfo(port);
+    });
+    
+    // Handle graceful shutdown
+    const gracefulShutdown = () => {
+      console.log('Shutting down server gracefully...');
+      server.close(() => {
+        console.log('Server closed');
+        process.exit(0);
+      });
+      
+      // Force close after 10 seconds if it doesn't close gracefully
+      setTimeout(() => {
+        console.error('Could not close connections in time, forcefully shutting down');
+        process.exit(1);
+      }, 10000);
+    };
+    
+    // Listen for termination signals
+    process.on('SIGTERM', gracefulShutdown);
+    process.on('SIGINT', gracefulShutdown);
+    
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+};
+
+startServer();

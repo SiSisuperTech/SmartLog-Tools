@@ -67,6 +67,7 @@ import {
 } from 'recharts';
 
 import { format, parseISO, subHours, subDays, isValid, differenceInDays } from 'date-fns';
+import LoadingPage from '../components/LoadingPage';
 
 // Extended types to fix TypeScript errors
 interface LogEntry {
@@ -139,6 +140,8 @@ const DentalXrayMonitoring: React.FC = () => {
   const queryParams = new URLSearchParams(location.search);
   const locationId = queryParams.get('locationId');
   
+  console.log(`DentalXrayMonitoring initialized with locationId: ${locationId || 'null'}`);
+  
   // Core state
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<LogEntry[]>([]);
@@ -174,6 +177,33 @@ const DentalXrayMonitoring: React.FC = () => {
     avgProcessingTime: 0
   });
   
+  // Update the useEffect
+  useEffect(() => {
+    // The locationId is already extracted at the component level  
+    if (locationId) {
+      console.log(`DentalXrayMonitoring initialized with locationId: ${locationId}`);
+      
+      // If we were passed a locationId, we might have filtered logs in sessionStorage
+      const logSourceStr = sessionStorage.getItem('logSource');
+      if (logSourceStr) {
+        setLogSource(logSourceStr as 'aws' | 'manual' | 'query' | null);
+      }
+    }
+    
+    // Check if we should show loading (set by ClinicMonitoringDashboard)
+    const shouldShowLoading = sessionStorage.getItem('showLoading') === 'true';
+    
+    // If showLoading is set, make sure we start with isLoading true
+    if (shouldShowLoading) {
+      setIsLoading(true);
+      // Clear the flag so it doesn't persist between navigations
+      sessionStorage.removeItem('showLoading');
+    }
+    
+    // Let the normal loading process happen but ensure loading state is shown
+    setTimeout(() => setIsLoading(false), 1500); // Show loading animation for a bit
+  }, [locationId]);
+
   // Format timestamp for display - Use browser's local timezone
   const formatTimestamp = useCallback((timestamp: string): string => {
     try {
@@ -516,168 +546,135 @@ const DentalXrayMonitoring: React.FC = () => {
             const allData = JSON.parse(monitoringDataStr);
             
             // Find the clinic with this locationId
-            const matchingClinic = allData.find((clinic: any) => 
-              clinic.locationId === locationId
-            );
+            const matchingClinic = locationId ? 
+              allData.find((clinic: any) => clinic.locationId === locationId) : 
+              null;
             
             if (matchingClinic) {
-              console.log(`Found clinic in monitoring data: ${matchingClinic.name}`);
+              console.log(`Found monitoring data for clinic with locationId ${locationId}:`, matchingClinic);
+              monitoringData = matchingClinic;
+            } else if (locationId) {
+              console.log(`No monitoring data found for locationId ${locationId}`);
+            } else {
+              console.log(`No locationId provided, will use general logs`);
+            }
+          }
+        } catch (error) {
+          console.error('Error parsing monitoring data:', error);
+        }
+        
+        // Check if we have logs in session storage from the LogAnalysisPage
+        const source = sessionStorage.getItem('logSource');
+        let storedLogs: LogEntry[] = [];
+        
+        if (source) {
+          // Try different storage formats
+          if (source === 'manual') {
+            // Load manually uploaded logs
+            const logStorage = sessionStorage.getItem('manualLogs');
+            if (logStorage) {
+              const parsed = JSON.parse(logStorage);
+              storedLogs = Array.isArray(parsed) ? parsed : [parsed];
+            }
+          } 
+          else if (source === 'aws' || source === 'query') {
+            // Check if logs are chunked
+            const chunksCount = sessionStorage.getItem(`${source}Logs_chunks`);
+            
+            if (chunksCount) {
+              console.log(`Loading chunked logs: ${chunksCount} chunks`);
               
-              // Check for xrayDataCache in sessionStorage
-              const xrayDataCacheStr = sessionStorage.getItem('xrayDataCache');
-              if (xrayDataCacheStr && locationId) {
+              // Load logs from chunks
+              const count = parseInt(chunksCount);
+              
+              for (let i = 0; i < count; i++) {
+                const chunkStr = sessionStorage.getItem(`${source}Logs_chunk_${i}`);
+                if (chunkStr) {
+                  try {
+                    const chunk = JSON.parse(chunkStr);
+                    storedLogs = storedLogs.concat(chunk);
+                  } catch (e) {
+                    console.error(`Error parsing chunk ${i}:`, e);
+                  }
+                }
+              }
+              
+              console.log(`Loaded ${storedLogs.length} logs from ${count} chunks`);
+            } else {
+              // Load AWS logs
+              const logStorage = sessionStorage.getItem(`${source}Logs`);
+              if (logStorage) {
                 try {
-                  const xrayDataCache = JSON.parse(xrayDataCacheStr);
-                  if (xrayDataCache && xrayDataCache[locationId]) {
-                    console.log(`Found ${xrayDataCache[locationId].length} treatments in xrayDataCache for locationId ${locationId}`);
-                    
-                    // Create log entries from treatment data
-                    const treatmentLogs: LogEntry[] = xrayDataCache[locationId].map((treatment: any) => ({
-                      timestamp: treatment.timestamp,
-                      message: `${treatment.success ? 'Successfully processed' : 'Failed to process'} ${treatment.type} X-ray for patient ${treatment.patientName} (ID: ${treatment.patientId})`,
-                      severity: treatment.success ? 'info' : 'error',
-                      id: `log-${treatment.id}`
-                    }));
-                    
-                    setLogs(treatmentLogs);
-                    setFilteredLogs(treatmentLogs);
-                    processSystemHealth(treatmentLogs);
-                    
-                    // Set log source to indicate data origin
-                    setLogSource('query');
-                    
-                    // Update timestamps
-                    setLastUpdated(new Date());
-                    
-                    // Early return - we have data
-                    setIsLoading(false);
-                    return;
+                  const parsed = JSON.parse(logStorage);
+                  
+                  // Handle direct array format (new format)
+                  if (Array.isArray(parsed)) {
+                    console.log('Found direct array format logs', parsed.length);
+                    storedLogs = parsed;
+                  }
+                  // Handle wrapped results format (legacy format)
+                  else if (parsed.results && Array.isArray(parsed.results)) {
+                    console.log('Found results-wrapped logs', parsed.results.length);
+                    storedLogs = parsed.results;
+                  } else {
+                    console.log('Unknown logs format:', parsed);
                   }
                 } catch (e) {
-                  console.error('Error parsing xrayDataCache:', e);
+                  console.error('Error parsing AWS logs:', e);
                 }
               }
             }
           }
-        } catch (e) {
-          console.error('Error checking local storage:', e);
         }
         
-        // If no data found in cache, query AWS CloudWatch logs
-        if (locationId) {
-          console.log('No data found in cache. Querying AWS CloudWatch logs for locationId:', locationId);
-          
-          const nowMs = Date.now();
-          const oneDayAgoMs = nowMs - (24 * 60 * 60 * 1000);
-          
-          try {
-            // Make API request to get logs from CloudWatch
-            const response = await fetch('/api/logs', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                startTime: oneDayAgoMs,
-                endTime: nowMs,
-                locationIds: [locationId],
-                version: '2.4.5', // Use the correct version or make configurable
-                limit: 1000
-              })
-            });
-            
-            if (!response.ok) {
-              throw new Error(`Failed to fetch logs: ${response.status} ${response.statusText}`);
-            }
-            
-            const logsData = await response.json();
-            
-            if (logsData.results && Array.isArray(logsData.results)) {
-              console.log(`Received ${logsData.results.length} log entries from AWS CloudWatch`);
-              
-              // Transform CloudWatch logs into application format
-              const fetchedLogs: LogEntry[] = logsData.results.map((logEntry: any, index: number) => {
-                try {
-                  // Handle different CloudWatch log formats
-                  let message: string = '';
-                  let timestamp: string = '';
-                  
-                  if (Array.isArray(logEntry)) {
-                    // Format 1: Array of field objects [{field: '@timestamp', value: '...'}, {field: '@message', value: '...'}]
-                    const messageField = logEntry.find((field: any) => field.field === '@message');
-                    const timestampField = logEntry.find((field: any) => field.field === '@timestamp');
-                    
-                    message = messageField?.value || '';
-                    timestamp = timestampField?.value || new Date().toISOString();
-                  } else if (typeof logEntry === 'object' && logEntry !== null) {
-                    // Format 2: Object with direct properties
-                    message = logEntry.message || logEntry['@message'] || '';
-                    timestamp = logEntry.timestamp || logEntry['@timestamp'] || new Date().toISOString();
-                  } else {
-                    // String format or unexpected format
-                    console.warn('Unexpected log entry format:', logEntry);
-                    message = String(logEntry);
-                    timestamp = new Date().toISOString();
-                  }
-                  
-                  // Determine severity based on message content
-                  let severity = 'info';
-                  if (message.includes('error') || message.includes('failed') || message.includes('Failed')) {
-                    severity = 'error';
-                  } else if (message.includes('warning') || message.includes('Warning')) {
-                    severity = 'warning';
-                  }
-                  
-                  return {
-                    id: `log-${index}-${Date.now()}`,
-                    timestamp,
-                    message,
-                    severity
-                  };
-            } catch (error) {
-                  console.error('Error processing log entry:', error, logEntry);
-                  // Return a fallback log entry
-                  return {
-                    id: `log-error-${index}-${Date.now()}`,
-                    timestamp: new Date().toISOString(),
-                    message: 'Error processing log entry',
-                    severity: 'error'
-                  };
-                }
-              });
-              
-              // Normalize timestamps for consistency
-              const normalizedLogs = normalizeLogTimestamps(fetchedLogs);
-          
-          // Set the logs
-              setLogs(normalizedLogs);
-              setFilteredLogs(normalizedLogs);
-              processSystemHealth(normalizedLogs);
-              setLogSource('query');
-              console.log(`Processed ${normalizedLogs.length} log entries from AWS CloudWatch`);
+        // Filter logs by locationId if provided
+        if (locationId && storedLogs.length > 0) {
+          console.log(`Filtering ${storedLogs.length} logs for locationId: ${locationId}`);
+          storedLogs = storedLogs.filter(log => 
+            log.logStream?.includes(`[${locationId}]`)
+          );
+          console.log(`Found ${storedLogs.length} logs for locationId: ${locationId}`);
+        }
         
-        setLastUpdated(new Date());
-              setIsLoading(false);
-              return;
-            } else {
-              console.warn('No results found in CloudWatch logs response');
-            }
-          } catch (error) {
-            console.error('Error fetching CloudWatch logs:', error);
-            // Continue to fallback for demo/testing purposes
+        // If we have logs, process them
+        if (storedLogs.length > 0) {
+          setLogs(storedLogs);
+          setFilteredLogs(storedLogs);
+          
+          // Extract X-ray data
+          const xrays = extractPatientData(storedLogs);
+          if (xrays.length > 0) {
+            setTreatments(xrays);
+            setSystemMetrics(prev => ({
+              ...prev,
+              xrayCount: xrays.length,
+              patientCount: [...new Set(xrays.map(x => x.patientId))].length
+            }));
+          } else {
+            console.log('No X-ray data found in logs');
+            setTreatments([]);
           }
+          
+          // Update status based on log analysis
+          processSystemHealth(storedLogs);
+        } else {
+          console.log('No logs found');
+          setTreatments([]);
         }
         
-        // Only set a small delay to show loading state
-        setTimeout(() => {
-          setIsLoading(false);
-        }, 1000);
+        // Set log source to indicate data origin
+        setLogSource(source as 'aws' | 'manual' | 'query' | null);
+        
+        // Update timestamps
+        setLastUpdated(new Date());
+        
+        setIsLoading(false);
       } catch (error) {
         console.error('Error loading logs:', error);
         setError(`Failed to load logs: ${error instanceof Error ? error.message : 'Unknown error'}`);
         setLogs([]);
         setFilteredLogs([]);
-          setIsLoading(false);
+        setIsLoading(false);
       }
     };
 
@@ -697,33 +694,16 @@ const DentalXrayMonitoring: React.FC = () => {
         clearInterval(intervalId);
       }
     };
-  }, [normalizeLogTimestamps, parseTimestamp, processSystemHealth, refreshInterval, locationId]);
+  }, [locationId, processSystemHealth, refreshInterval]);
   
   // Loading state with logo
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center">
-        <div className="w-24 h-24 mb-6 relative">
-          {/* Logo - X-ray stylized logo */}
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-full opacity-20 animate-pulse"></div>
-          <div className="absolute inset-2 bg-slate-900 rounded-full"></div>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Radio className="w-12 h-12 text-blue-400" />
-          </div>
-        </div>
-        
-        <div className="text-center">
-          <h2 className="text-xl text-white font-medium mb-2">Loading X-ray Monitoring</h2>
-          {locationId && (
-            <p className="text-slate-400 mb-4">Loading data for clinic ID: {locationId}</p>
-          )}
-          <div className="flex items-center justify-center">
-            <div className="h-1 w-48 bg-slate-700 rounded-full overflow-hidden">
-              <div className="h-full bg-blue-500 animate-progress-indeterminate"></div>
-            </div>
-          </div>
-        </div>
-      </div>
+      <LoadingPage 
+        message="Loading X-ray Monitoring Data" 
+        showProgress={true}
+        isLoading={isLoading}
+      />
     );
   }
   
@@ -776,7 +756,9 @@ const DentalXrayMonitoring: React.FC = () => {
   }
   
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-slate-900' : 'bg-gray-100'} ${isFullScreen ? 'p-0' : 'p-4 md:p-6'} ${darkMode ? 'text-white' : 'text-gray-900'} transition-all duration-300`}>
+    <div 
+      className={`min-h-screen ${darkMode ? 'bg-slate-900' : 'bg-gray-100'} ${isFullScreen ? 'p-0' : 'p-4 md:p-6'} ${darkMode ? 'text-white' : 'text-gray-900'} transition-all duration-300`}
+    >
       <div className={`${isFullScreen ? 'max-w-full' : 'max-w-6xl'} mx-auto`}>
         {/* Header */}
         <div className="flex flex-wrap justify-between items-center mb-6 gap-4">
